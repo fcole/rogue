@@ -105,6 +105,37 @@ class GridBuilder:
         
         return f"Placed {entity_type} at ({x},{y})"
     
+    def place_multiple_entities(self, entities: List[Dict[str, Any]]) -> str:
+        """Place multiple entities at once for efficiency."""
+        if not self.grid:
+            return "Error: Must create grid first"
+        
+        results = []
+        for entity_data in entities:
+            entity_type = entity_data["entity_type"]
+            x = entity_data["x"]
+            y = entity_data["y"]
+            properties = entity_data.get("properties", {})
+            
+            if not self._in_bounds(x, y):
+                results.append(f"Error: Invalid coordinates ({x},{y}) for {entity_type}")
+                continue
+            
+            # Check if position is on floor
+            if self.grid[y][x] != '.':
+                results.append(f"Warning: {entity_type} at ({x},{y}) not on floor tile")
+            
+            if entity_type not in self.entities:
+                self.entities[entity_type] = []
+            
+            self.entities[entity_type].append(EntityData(
+                x=x, y=y, properties=properties
+            ))
+            
+            results.append(f"Placed {entity_type} at ({x},{y})")
+        
+        return "; ".join(results)
+    
     def get_grid_status(self) -> str:
         """Get current grid dimensions and tile counts."""
         if not self.grid:
@@ -280,13 +311,39 @@ class ToolBasedMapGenerator:
                     "properties": {
                         "entity_type": {
                             "type": "string", 
-                            "enum": ["goblin", "shop", "chest", "player", "npc"]
+                            "enum": ["player", "ogre", "goblin", "shop", "chest"]
                         },
                         "x": {"type": "integer", "minimum": 0, "maximum": 19},
                         "y": {"type": "integer", "minimum": 0, "maximum": 14},
                         "properties": {"type": "object"}
                     },
                     "required": ["entity_type", "x", "y"]
+                }
+            },
+            {
+                "name": "place_multiple_entities",
+                "description": "Place multiple entities at once for efficiency",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "entities": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "entity_type": {
+                                        "type": "string",
+                                        "enum": ["player", "ogre", "goblin", "shop", "chest"]
+                                    },
+                                    "x": {"type": "integer", "minimum": 0, "maximum": 19},
+                                    "y": {"type": "integer", "minimum": 0, "maximum": 14},
+                                    "properties": {"type": "object"}
+                                },
+                                "required": ["entity_type", "x", "y"]
+                            }
+                        }
+                    },
+                    "required": ["entities"]
                 }
             },
             {
@@ -364,19 +421,19 @@ Use the available tools to build the map step by step:
 2. Use place_room to create rooms for the scene
 3. Use place_door and place_corridor to connect spaces
 4. Use place_entity to add characters and objects
-5. Check your progress with get_grid_status
+5. Finish efficiently - avoid unnecessary status checks
 
 Build a map that matches the prompt creatively while ensuring proper connectivity."""
         }]
         
-        max_iterations = 20
+        max_iterations = 10  # Reduced from 20
         iteration = 0
         
         while iteration < max_iterations:
             try:
                 response = self.client.messages.create(
                     model="claude-3-5-sonnet-20241022",
-                    max_tokens=4000,
+                    max_tokens=1500,  # Reduced from 4000 - tool calls are short
                     tools=self.tools,
                     messages=messages
                 )
@@ -450,6 +507,8 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
                 return builder.place_corridor(**tool_input)
             elif tool_name == "place_entity":
                 return builder.place_entity(**tool_input)
+            elif tool_name == "place_multiple_entities":
+                return builder.place_multiple_entities(**tool_input)
             elif tool_name == "get_grid_status":
                 return builder.get_grid_status()
             else:
