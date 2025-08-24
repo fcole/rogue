@@ -57,7 +57,52 @@ class GridBuilder:
                 else:  # Interior floor
                     self.grid[i][j] = '.'
         
-        return f"Placed {width}x{height} room at ({x},{y})"
+        # Check if this room might be isolated and provide guidance
+        isolation_warning = self._check_room_isolation_warning(x, y, width, height)
+        
+        return f"Placed {width}x{height} room at ({x},{y}){isolation_warning}"
+    
+    def _check_room_isolation_warning(self, x: int, y: int, width: int, height: int) -> str:
+        """Check if a room might be isolated and provide guidance."""
+        if not self.grid:
+            return ""
+        
+        # Check if there are other floor tiles outside this room
+        has_external_floors = False
+        for i in range(len(self.grid)):
+            for j in range(len(self.grid[0])):
+                if (self.grid[i][j] == '.' and 
+                    (i < y or i >= y + height or j < x or j >= x + width)):
+                    has_external_floors = True
+                    break
+            if has_external_floors:
+                break
+        
+        # If there are external floors but no doors/corridors, warn about isolation
+        if has_external_floors:
+            # Check if there are any doors or corridors connecting to this room
+            has_connections = False
+            for i in range(y, y + height):
+                for j in range(x, x + width):
+                    if self.grid[i][j] in ['.', '+']:  # Floor or door
+                        # Check if adjacent to external floor
+                        for di, dj in [(-1,0), (1,0), (0,-1), (0,1)]:
+                            ni, nj = i + di, j + dj
+                            if (0 <= ni < len(self.grid) and 
+                                0 <= nj < len(self.grid[0]) and
+                                (ni < y or ni >= y + height or nj < x or nj >= x + width) and
+                                self.grid[ni][nj] == '.'):
+                                has_connections = True
+                                break
+                        if has_connections:
+                            break
+                if has_connections:
+                    break
+            
+            if not has_connections:
+                return " ⚠️ WARNING: This room appears isolated from other areas. Consider using place_door() or place_corridor() to connect it!"
+        
+        return ""
     
     def place_door(self, x: int, y: int) -> str:
         """Place a door at the specified coordinates."""
@@ -236,7 +281,7 @@ class GridBuilder:
         
         # Check if most floor/door tiles are reachable
         total_accessible = sum(row.count('.') + row.count('+') for row in self.grid)
-        return reachable_count >= total_accessible * 0.8
+        return reachable_count == total_accessible
 
 
 class ToolBasedMapGenerator:
@@ -265,7 +310,7 @@ class ToolBasedMapGenerator:
             },
             {
                 "name": "place_room", 
-                "description": "Create a rectangular room with walls and floor",
+                "description": "Create a rectangular room with walls and floor. IMPORTANT: After placing a room, ensure it connects to other areas using place_door or place_corridor to maintain connectivity.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -279,7 +324,7 @@ class ToolBasedMapGenerator:
             },
             {
                 "name": "place_door",
-                "description": "Place a door at specific coordinates",
+                "description": "Place a door at specific coordinates. Use this to create doorways between rooms and ensure all areas are connected.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -291,7 +336,7 @@ class ToolBasedMapGenerator:
             },
             {
                 "name": "place_corridor",
-                "description": "Create a corridor between two points",
+                "description": "Create a corridor between two points. Use this to connect separated areas and ensure map connectivity. Essential for avoiding isolated regions.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -305,7 +350,7 @@ class ToolBasedMapGenerator:
             },
             {
                 "name": "place_entity",
-                "description": "Place an entity (goblin, shop, chest, player) at coordinates",
+                "description": "Place an entity (goblin, shop, chest, player) at coordinates. Only place on floor tiles (.) or door tiles (+).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -322,7 +367,7 @@ class ToolBasedMapGenerator:
             },
             {
                 "name": "place_multiple_entities",
-                "description": "Place multiple entities at once for efficiency",
+                "description": "Place multiple entities at once for efficiency. Only place on floor tiles (.) or door tiles (+).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -348,7 +393,7 @@ class ToolBasedMapGenerator:
             },
             {
                 "name": "get_grid_status",
-                "description": "Get current grid status including dimensions and tile counts",
+                "description": "Get current grid status including dimensions and tile counts. Use this to verify your map before finishing.",
                 "input_schema": {"type": "object", "properties": {}}
             }
         ]
@@ -416,12 +461,29 @@ class ToolBasedMapGenerator:
             "role": "user",
             "content": f"""Create a roguelike map for this prompt: "{prompt}"
 
-Use the available tools to build the map step by step:
+CONNECTIVITY IS CRITICAL - READ CAREFULLY:
+- Every floor tile (.) must be reachable from every other floor tile
+- After placing each room, think: 'How does someone get here?'
+- Use place_corridor(x1,y1,x2,y2) to connect separated areas
+- Use place_door(x,y) to create doorways between rooms
+
+AVOID THESE MISTAKES:
+❌ Don't create walled-off 'ponds' or 'islands' without connections
+❌ Don't place rooms without doors or corridors
+✅ DO connect every room to the main area with doors or corridors
+
+BUILDING STEPS:
 1. First create_grid(20, 15) to initialize 
 2. Use place_room to create rooms for the scene
 3. Use place_door and place_corridor to connect spaces
 4. Use place_entity to add characters and objects
 5. Finish efficiently - avoid unnecessary status checks
+
+CONNECTIVITY EXAMPLES:
+✅ GOOD: Rooms connected by doors/corridors
+❌ BAD: Isolated rooms with no connections
+
+If you create a 'pond' or 'separate area', add a corridor or door to connect it!
 
 Build a map that matches the prompt creatively while ensuring proper connectivity."""
         }]
@@ -483,6 +545,54 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
         if iteration >= max_iterations:
             self.logger.warning(f"Map generation hit iteration limit for {map_id}")
         
+        # Check connectivity and give LLM a chance to fix issues
+        if not builder._check_basic_connectivity():
+            self.logger.info(f"Map {map_id} has connectivity issues, giving LLM chance to fix")
+            
+            # Send connectivity warning with specific guidance
+            connectivity_warning = self._generate_connectivity_warning(builder)
+            messages.append({
+                "role": "user",
+                "content": f"""⚠️ CONNECTIVITY WARNING: Your map has isolated areas that cannot be reached!
+
+{connectivity_warning}
+
+Use place_corridor() or place_door() to connect separated regions. Fix this connectivity issue and continue building."""
+            })
+            
+            # Give LLM another chance to fix connectivity
+            try:
+                response = self.client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=1500,
+                    tools=self.tools,
+                    messages=messages
+                )
+                
+                # Process any tool calls to fix connectivity
+                if response.stop_reason == "tool_use":
+                    for content_block in response.content:
+                        if content_block.type == "tool_use":
+                            result = self._execute_tool(
+                                content_block.name,
+                                content_block.input,
+                                builder
+                            )
+                            self.logger.info(f"Connectivity fix tool call: {content_block.name} -> {result}")
+                
+                # Check if connectivity was fixed
+                if builder._check_basic_connectivity():
+                    self.logger.info(f"Map {map_id} connectivity fixed successfully by LLM")
+                    messages.append({
+                        "role": "user",
+                        "content": "✅ Excellent! You've successfully fixed the connectivity issues. Your map is now fully connected."
+                    })
+                else:
+                    self.logger.warning(f"Map {map_id} still has connectivity issues after LLM fix attempt")
+                
+            except Exception as e:
+                self.logger.warning(f"LLM failed to fix connectivity: {e}")
+        
         # Convert builder result to MapData
         try:
             return builder.to_map_data(map_id, prompt)
@@ -517,3 +627,85 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
         except Exception as e:
             self.logger.error(f"Tool execution error: {e}")
             return f"Error executing {tool_name}: {str(e)}"
+    
+    def _generate_connectivity_warning(self, builder: GridBuilder) -> str:
+        """Generate specific guidance for connectivity issues."""
+        if not builder.grid:
+            return "Grid not created yet."
+        
+        # Find isolated regions
+        isolated_regions = self._find_isolated_regions(builder.grid)
+        
+        if not isolated_regions:
+            return "No specific isolated regions found."
+        
+        warning = "Found these isolated areas:\n"
+        for i, region in enumerate(isolated_regions[:3]):  # Show first 3 regions
+            warning += f"- Region {i+1}: {region['size']} floor tiles around ({region['center_x']}, {region['center_y']})\n"
+        
+        warning += "\nSUGGESTIONS TO FIX:\n"
+        warning += "1. Use place_door(x,y) to create doorways between rooms\n"
+        warning += "2. Use place_corridor(x1,y1,x2,y2) to connect separated areas\n"
+        warning += "3. Ensure every room has at least one connection to other areas\n"
+        
+        return warning
+    
+    def _find_isolated_regions(self, grid: List[List[str]]) -> List[Dict[str, Any]]:
+        """Find isolated regions in the grid."""
+        if not grid:
+            return []
+        
+        height = len(grid)
+        width = len(grid[0]) if grid else 0
+        
+        # Find all floor tiles
+        floor_tiles = []
+        for y in range(height):
+            for x in range(width):
+                if grid[y][x] == '.':
+                    floor_tiles.append((x, y))
+        
+        if not floor_tiles:
+            return []
+        
+        # Find connected components using flood fill
+        visited = set()
+        regions = []
+        
+        for start_x, start_y in floor_tiles:
+            if (start_x, start_y) in visited:
+                continue
+            
+            # Flood fill from this tile
+            region_tiles = []
+            stack = [(start_x, start_y)]
+            
+            while stack:
+                x, y = stack.pop()
+                if (x, y) in visited or grid[y][x] != '.':
+                    continue
+                
+                visited.add((x, y))
+                region_tiles.append((x, y))
+                
+                # Add neighbors
+                for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
+                    nx, ny = x + dx, y + dy
+                    if (0 <= nx < width and 0 <= ny < height and 
+                        grid[ny][nx] == '.' and (nx, ny) not in visited):
+                        stack.append((nx, ny))
+            
+            if region_tiles:
+                # Calculate region center and size
+                center_x = sum(x for x, y in region_tiles) // len(region_tiles)
+                center_y = sum(y for x, y in region_tiles) // len(region_tiles)
+                
+                regions.append({
+                    'tiles': region_tiles,
+                    'center_x': center_x,
+                    'center_y': center_y,
+                    'size': len(region_tiles)
+                })
+        
+        # Return regions sorted by size (largest first)
+        return sorted(regions, key=lambda r: r['size'], reverse=True)
