@@ -34,48 +34,9 @@ def validate_map_dimensions(tiles: str, width: int, height: int) -> tuple[bool, 
 
 
 def validate_map_connectivity(tiles: str, width: int, height: int) -> bool:
-    """Check if all floor tiles are reachable from each other."""
-    lines = tiles.strip().split('\n')
-    if len(lines) != height:
-        return False
-    
-    # Check dimensions first - if any row has wrong length, can't check connectivity
-    for y, line in enumerate(lines):
-        if len(line) != width:
-            return False
-    
-    # Find first floor tile
-    start = None
-    for y, line in enumerate(lines):
-        for x, char in enumerate(line):
-            if char == '.':  # floor tile
-                start = (x, y)
-                break
-        if start:
-            break
-    
-    if not start:
-        return False  # No floor tiles
-    
-    # BFS to find all reachable floor tiles
-    visited = set()
-    queue = [start]
-    visited.add(start)
-    
-    while queue:
-        x, y = queue.pop(0)
-        
-        # Check all 4 directions
-        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            nx, ny = x + dx, y + dy
-            if (0 <= nx < width and 0 <= ny < height and 
-                (nx, ny) not in visited and lines[ny][nx] == '.'):
-                visited.add((nx, ny))
-                queue.append((nx, ny))
-    
-    # Count total floor tiles
-    total_floors = sum(line.count('.') for line in lines)
-    return len(visited) == total_floors
+    """Check if all accessible tiles (floors + doors) are reachable from each other."""
+    from .connectivity import check_map_connectivity
+    return check_map_connectivity(tiles, width, height)
 
 
 def visualize_map(map_data: MapData) -> str:

@@ -243,45 +243,10 @@ class GridBuilder:
         if not self.grid:
             return False
         
-        # Find first floor tile
-        start_pos = None
-        for i in range(len(self.grid)):
-            for j in range(len(self.grid[0])):
-                if self.grid[i][j] in ['.', '+']:
-                    start_pos = (i, j)
-                    break
-            if start_pos:
-                break
-        
-        if not start_pos:
-            return False
-        
-        # Simple flood fill to count reachable tiles
-        visited = set()
-        stack = [start_pos]
-        reachable_count = 0
-        
-        while stack:
-            i, j = stack.pop()
-            if (i, j) in visited:
-                continue
-                
-            visited.add((i, j))
-            if self.grid[i][j] in ['.', '+']:
-                reachable_count += 1
-                
-                # Add neighbors
-                for di, dj in [(-1,0), (1,0), (0,-1), (0,1)]:
-                    ni, nj = i + di, j + dj
-                    if (0 <= ni < len(self.grid) and 
-                        0 <= nj < len(self.grid[0]) and 
-                        (ni, nj) not in visited and
-                        self.grid[ni][nj] in ['.', '+']):
-                        stack.append((ni, nj))
-        
-        # Check if most floor/door tiles are reachable
-        total_accessible = sum(row.count('.') + row.count('+') for row in self.grid)
-        return reachable_count == total_accessible
+        # Convert grid to tiles string for shared connectivity check
+        tiles_str = '\n'.join(''.join(row) for row in self.grid)
+        from ..shared.connectivity import check_map_connectivity
+        return check_map_connectivity(tiles_str, len(self.grid[0]), len(self.grid))
 
 
 class ToolBasedMapGenerator:
@@ -677,103 +642,17 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
         if not grid:
             return 0
         
-        height = len(grid)
-        width = len(grid[0]) if grid else 0
-        
-        # Find first floor/door tile
-        start_pos = None
-        for i in range(height):
-            for j in range(width):
-                if grid[i][j] in ['.', '+']:
-                    start_pos = (i, j)
-                    break
-            if start_pos:
-                break
-        
-        if not start_pos:
-            return 0
-        
-        # Flood fill to count reachable tiles
-        visited = set()
-        stack = [start_pos]
-        reachable_count = 0
-        
-        while stack:
-            i, j = stack.pop()
-            if (i, j) in visited:
-                continue
-                
-            visited.add((i, j))
-            if grid[i][j] in ['.', '+']:
-                reachable_count += 1
-                
-                # Add neighbors
-                for di, dj in [(-1,0), (1,0), (0,-1), (0,1)]:
-                    ni, nj = i + di, j + dj
-                    if (0 <= ni < height and 
-                        0 <= nj < width and 
-                        (ni, nj) not in visited and
-                        grid[ni][nj] in ['.', '+']):
-                        stack.append((ni, nj))
-        
-        return reachable_count
+        # Convert grid to tiles string for shared connectivity check
+        tiles_str = '\n'.join(''.join(row) for row in grid)
+        from ..shared.connectivity import count_reachable_tiles
+        return count_reachable_tiles(tiles_str, len(grid[0]), len(grid))
     
     def _find_isolated_regions(self, grid: List[List[str]]) -> List[Dict[str, Any]]:
         """Find isolated regions in the grid."""
         if not grid:
             return []
         
-        height = len(grid)
-        width = len(grid[0]) if grid else 0
-        
-        # Find all floor tiles
-        floor_tiles = []
-        for y in range(height):
-            for x in range(width):
-                if grid[y][x] == '.':
-                    floor_tiles.append((x, y))
-        
-        if not floor_tiles:
-            return []
-        
-        # Find connected components using flood fill
-        visited = set()
-        regions = []
-        
-        for start_x, start_y in floor_tiles:
-            if (start_x, start_y) in visited:
-                continue
-            
-            # Flood fill from this tile
-            region_tiles = []
-            stack = [(start_x, start_y)]
-            
-            while stack:
-                x, y = stack.pop()
-                if (x, y) in visited or grid[y][x] != '.':
-                    continue
-                
-                visited.add((x, y))
-                region_tiles.append((x, y))
-                
-                # Add neighbors
-                for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
-                    nx, ny = x + dx, y + dy
-                    if (0 <= nx < width and 0 <= ny < height and 
-                        grid[ny][nx] == '.' and (nx, ny) not in visited):
-                        stack.append((nx, ny))
-            
-            if region_tiles:
-                # Calculate region center and size
-                center_x = sum(x for x, y in region_tiles) // len(region_tiles)
-                center_y = sum(y for x, y in region_tiles) // len(region_tiles)
-                
-                regions.append({
-                    'tiles': region_tiles,
-                    'center_x': center_x,
-                    'center_y': center_y,
-                    'size': len(region_tiles)
-                })
-        
-        # Return regions sorted by size (largest first)
-        return sorted(regions, key=lambda r: r['size'], reverse=True)
+        # Convert grid to tiles string for shared connectivity check
+        tiles_str = '\n'.join(''.join(row) for row in grid)
+        from ..shared.connectivity import find_isolated_regions
+        return find_isolated_regions(tiles_str, len(grid[0]), len(grid))

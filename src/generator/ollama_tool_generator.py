@@ -197,45 +197,10 @@ class OllamaGridBuilder:
         if not self.grid:
             return False
         
-        # Find first floor tile
-        start_pos = None
-        for i in range(len(self.grid)):
-            for j in range(len(self.grid[0])):
-                if self.grid[i][j] in ['.', '+']:
-                    start_pos = (i, j)
-                    break
-            if start_pos:
-                break
-        
-        if not start_pos:
-            return False
-        
-        # Simple flood fill to count reachable tiles
-        visited = set()
-        stack = [start_pos]
-        reachable_count = 0
-        
-        while stack:
-            i, j = stack.pop()
-            if (i, j) in visited:
-                continue
-                
-            visited.add((i, j))
-            if self.grid[i][j] in ['.', '+']:
-                reachable_count += 1
-                
-                # Add neighbors
-                for di, dj in [(-1,0), (1,0), (0,-1), (0,1)]:
-                    ni, nj = i + di, j + dj
-                    if (0 <= ni < len(self.grid) and 
-                        0 <= nj < len(self.grid[0]) and 
-                        (ni, nj) not in visited and
-                        self.grid[ni][nj] in ['.', '+']):
-                        stack.append((ni, nj))
-        
-        # Check if most floor/door tiles are reachable
-        total_accessible = sum(row.count('.') + row.count('+') for row in self.grid)
-        return reachable_count >= total_accessible * 0.8
+        # Convert grid to tiles string for shared connectivity check
+        tiles_str = '\n'.join(''.join(row) for row in self.grid)
+        from ..shared.connectivity import check_map_connectivity
+        return check_map_connectivity(tiles_str, len(self.grid[0]), len(self.grid))
 
 
 class OllamaToolBasedGenerator:

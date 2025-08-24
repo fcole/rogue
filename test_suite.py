@@ -5,6 +5,7 @@ Runs generation, verification, and report generation in sequence.
 """
 import subprocess
 import sys
+import argparse
 from pathlib import Path
 import time
 import logging
@@ -41,40 +42,105 @@ def run_command(cmd, description):
 
 def main():
     """Run the complete test suite workflow."""
-    print("🏰 Roguelike Testing System - Full Test Suite")
+    parser = argparse.ArgumentParser(description="Roguelike Testing System")
+    parser.add_argument("--generate", action="store_true", 
+                       help="Generate maps from test suite")
+    parser.add_argument("--verify", action="store_true",
+                       help="Verify generated maps")
+    parser.add_argument("--report", action="store_true",
+                       help="Generate HTML report")
+    
+    args = parser.parse_args()
+    
+    # If no specific steps are requested, run the complete suite
+    if not any([args.generate, args.verify, args.report]):
+        args.generate = True
+        args.verify = True
+        args.report = True
+        print("🏰 Roguelike Testing System - Full Test Suite")
+    else:
+        steps = []
+        if args.generate: steps.append("Generation")
+        if args.verify: steps.append("Verification") 
+        if args.report: steps.append("Reporting")
+        print(f"🔧 Roguelike Testing System - {', '.join(steps)}")
+    
     print("=" * 50)
     
     # Step 1: Generate maps from test suite
-    if run_command("generate --example --visualize --use-tools", "Generating maps from test suite") != 0:
-        sys.exit(1)
+    if args.generate:
+        if run_command("generate --example --visualize --use-tools", "Generating maps from test suite") != 0:
+            sys.exit(1)
     
     # Step 2: Verify all generated maps
-    if run_command("verify --example", "Verifying generated maps") != 0:
-        sys.exit(1)
+    if args.verify:
+        if run_command("verify --example", "Verifying generated maps") != 0:
+            sys.exit(1)
     
     # Step 3: Generate HTML report
-    if run_command("report", "Generating HTML report") != 0:
-        sys.exit(1)
+    if args.report:
+        if run_command("report", "Generating HTML report") != 0:
+            sys.exit(1)
     
-    print("\n🎉 Full test suite completed successfully!")
-    print(f"📊 View results: file://{Path('data/report.html').absolute()}")
+    print("\n🎉 Test suite completed successfully!")
     
-    # Show quick summary
-    try:
-        import json
-        with open("data/generated/generation_results.json", 'r') as f:
-            gen_data = json.load(f)
-        with open("data/verification/verification_results.json", 'r') as f:
-            ver_data = json.load(f)
+    # Show appropriate summary based on what was run
+    if args.verify and args.report:
+        print(f"📊 View results: file://{Path('data/report.html').absolute()}")
         
-        print("\n📈 Quick Summary:")
-        print(f"   • Maps generated: {gen_data['summary']['successful']}/{gen_data['summary']['total_prompts']}")
-        print(f"   • Average score: {ver_data['summary']['average_score']:.1f}/10")
-        print(f"   • Maps passed: {ver_data['summary']['passed']}/{ver_data['summary']['total_tests']}")
-        print(f"   • Average gen time: {gen_data['summary']['average_time']:.1f}s")
+        try:
+            import json
+            with open("data/verification/verification_results.json", 'r') as f:
+                ver_data = json.load(f)
+            
+            print("\n📈 Verification Summary:")
+            print(f"   • Maps verified: {ver_data['summary']['total_tests']}")
+            print(f"   • Maps passed: {ver_data['summary']['passed']}")
+            print(f"   • Average score: {ver_data['summary']['average_score']:.1f}/10")
+            
+        except Exception as e:
+            print(f"   (Could not load verification summary: {e})")
+    
+    elif args.generate and args.verify:
+        try:
+            import json
+            with open("data/generated/generation_results.json", 'r') as f:
+                gen_data = json.load(f)
+            with open("data/verification/verification_results.json", 'r') as f:
+                ver_data = json.load(f)
+            
+            print("\n📈 Quick Summary:")
+            print(f"   • Maps generated: {gen_data['summary']['total_prompts']}")
+            print(f"   • Average score: {ver_data['summary']['average_score']:.1f}/10")
+            print(f"   • Maps passed: {ver_data['summary']['passed']}/{ver_data['summary']['total_tests']}")
+            print(f"   • Average gen time: {gen_data['summary']['average_time']:.1f}s")
+            
+        except Exception as e:
+            print(f"   (Could not load summary: {e})")
+    
+    elif args.generate:
+        print("\n✅ Generation completed successfully!")
+    
+    elif args.verify:
+        print("\n✅ Verification completed successfully!")
+        print(f"📊 View results: file://{Path('data/report.html').absolute()}")
         
-    except Exception as e:
-        print(f"   (Could not load summary: {e})")
+        try:
+            import json
+            with open("data/verification/verification_results.json", 'r') as f:
+                ver_data = json.load(f)
+            
+            print("\n📈 Verification Summary:")
+            print(f"   • Maps verified: {ver_data['summary']['total_tests']}")
+            print(f"   • Maps passed: {ver_data['summary']['passed']}")
+            print(f"   • Average score: {ver_data['summary']['average_score']:.1f}/10")
+            
+        except Exception as e:
+            print(f"   (Could not load verification summary: {e})")
+    
+    elif args.report:
+        print(f"\n✅ Report generation completed successfully!")
+        print(f"📊 View results: file://{Path('data/report.html').absolute()}")
 
 
 if __name__ == "__main__":
