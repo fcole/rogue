@@ -80,7 +80,23 @@ class MapGenerator:
 {
   "width": 20,
   "height": 15,
-  "tiles": "####################\\n#..................#\\n...",
+  "tiles": [
+    "####################",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "#..................#",
+    "####################"
+  ],
   "entities": {
     "ogre": [{"x": 5, "y": 3}],
     "goblin": [{"x": 10, "y": 7}],
@@ -88,25 +104,48 @@ class MapGenerator:
   }
 }
 
+CRITICAL DIMENSION REQUIREMENTS:
+- The "tiles" field MUST be an array of exactly {height} strings
+- Each string in the array MUST be exactly {width} characters long
+- NO EXCEPTIONS - wrong dimensions will cause automatic failure
+- Count characters carefully: "####################" = exactly 20 characters
+- Example: For 20x15 map, you need 15 strings, each exactly 20 characters
+
 Tile characters:
-- # = wall
-- . = floor 
-- + = door
-- ~ = water
+- # = wall (used for boundaries and obstacles)
+- . = floor (walkable space)
+- + = door (connections between areas)  
+- ~ = water (special terrain)
 
 Available entity types: player, ogre, goblin, shop, chest
 
-Rules:
-1. All floor tiles must be connected
-2. Place entities only on floor tiles
-3. Surround the map with walls
-4. Include all entities mentioned in the prompt"""
+STRICT RULES:
+1. Each row must be EXACTLY {width} characters - count carefully!
+2. Must have EXACTLY {height} rows in the tiles array
+3. All floor tiles must be connected (reachable from each other)
+4. Place entities only on floor tiles (.) - never on walls (#)
+5. Surround the entire map with walls (#) on all borders
+6. Include all entities mentioned in the prompt
+7. Verify your character count before responding
+
+Example of correct 20-character row: "####################" (count: 1,2,3...20 ✓)
+Example of incorrect row: "###################" (count: 1,2,3...19 ✗)"""
 
     def _build_user_prompt(self, prompt: str) -> str:
         width = self.config["map_defaults"]["width"]
         height = self.config["map_defaults"]["height"]
         
         return f"""Generate a {width}x{height} roguelike map for: "{prompt}"
+
+CRITICAL: Use the ARRAY format for tiles, NOT a single string!
+- "tiles": ["row1", "row2", "row3", ...] ✓ CORRECT
+- "tiles": "row1\\nrow2\\nrow3..." ✗ WRONG
+
+Each of the {height} strings in the tiles array must be exactly {width} characters.
+
+COMMON ERROR TO AVOID: When creating repeating patterns, count carefully!
+- "#....##....##....##" = 19 chars ✗ TOO SHORT
+- "#....##....##....###" = 20 chars ✓ CORRECT
 
 Return only valid JSON matching the specified format. No additional text."""
 
@@ -122,6 +161,15 @@ Return only valid JSON matching the specified format. No additional text."""
             
             data = json.loads(response)
             
+            # Handle both old format (string with \n) and new format (array of strings)
+            tiles_data = data.get("tiles", "")
+            if isinstance(tiles_data, list):
+                # New format: array of strings
+                tiles_string = '\n'.join(tiles_data)
+            else:
+                # Old format: single string with \n separators
+                tiles_string = tiles_data
+            
             # Convert entities dict to our format
             entities = {}
             for entity_type, entity_list in data.get("entities", {}).items():
@@ -132,12 +180,12 @@ Return only valid JSON matching the specified format. No additional text."""
                     ]
             
             # Calculate metadata
-            tile_counts = count_tiles(data["tiles"])
+            tile_counts = count_tiles(tiles_string)
             metadata = {
                 "wall_count": tile_counts["wall"],
                 "floor_count": tile_counts["floor"],
                 "connectivity_verified": validate_map_connectivity(
-                    data["tiles"], data["width"], data["height"]
+                    tiles_string, data["width"], data["height"]
                 )
             }
             
@@ -146,7 +194,7 @@ Return only valid JSON matching the specified format. No additional text."""
                 prompt=prompt,
                 width=data["width"],
                 height=data["height"],
-                tiles=data["tiles"],
+                tiles=tiles_string,  # Store as string for compatibility
                 entities=entities,
                 metadata=metadata
             )

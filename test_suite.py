@@ -38,8 +38,8 @@ def main():
     print("=" * 50)
     
     # Step 1: Generate maps from test suite
-    # if run_command("generate --example --visualize", "Generating maps from test suite") != 0:
-    #    sys.exit(1)
+    if run_command("generate --example --visualize", "Generating maps from test suite") != 0:
+        sys.exit(1)
     
     # Step 2: Verify all generated maps
     if run_command("verify --example", "Verifying generated maps") != 0:
