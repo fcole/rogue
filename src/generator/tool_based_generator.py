@@ -547,10 +547,17 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
         
         # Check connectivity and give LLM a chance to fix issues
         if not builder._check_basic_connectivity():
-            self.logger.info(f"Map {map_id} has connectivity issues, giving LLM chance to fix")
+            print(f"\n🔍 CONNECTIVITY DEBUG: Map {map_id} has connectivity issues")
+            
+            # Log detailed connectivity analysis
+            total_accessible = sum(row.count('.') + row.count('+') for row in builder.grid)
+            reachable_count = self._count_reachable_tiles(builder.grid)
+            print(f"📊 Connectivity analysis: {reachable_count}/{total_accessible} tiles reachable")
             
             # Send connectivity warning with specific guidance
             connectivity_warning = self._generate_connectivity_warning(builder)
+            print(f"⚠️ Connectivity warning: {connectivity_warning}")
+            
             messages.append({
                 "role": "user",
                 "content": f"""⚠️ CONNECTIVITY WARNING: Your map has isolated areas that cannot be reached!
@@ -562,6 +569,7 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
             
             # Give LLM another chance to fix connectivity
             try:
+                print(f"🤖 Sending connectivity fix request to LLM...")
                 response = self.client.messages.create(
                     model="claude-3-5-sonnet-20241022",
                     max_tokens=1500,
@@ -569,29 +577,43 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
                     messages=messages
                 )
                 
+                print(f"📨 LLM response received. Stop reason: {response.stop_reason}")
+                print(f"📦 Response content blocks: {len(response.content)}")
+                
                 # Process any tool calls to fix connectivity
                 if response.stop_reason == "tool_use":
-                    for content_block in response.content:
+                    print("🔧 Processing tool calls for connectivity fix...")
+                    for i, content_block in enumerate(response.content):
+                        print(f"📋 Content block {i}: type={content_block.type}")
                         if content_block.type == "tool_use":
+                            print(f"🛠️ Tool call: {content_block.name} with input: {content_block.input}")
                             result = self._execute_tool(
                                 content_block.name,
                                 content_block.input,
                                 builder
                             )
-                            self.logger.info(f"Connectivity fix tool call: {content_block.name} -> {result}")
+                            print(f"✅ Tool execution result: {result}")
+                else:
+                    print(f"❌ LLM did not make tool calls. Response: {response.content[0].text if response.content else 'No content'}")
                 
                 # Check if connectivity was fixed
+                new_reachable = self._count_reachable_tiles(builder.grid)
+                print(f"📊 After fix attempt: {new_reachable}/{total_accessible} tiles reachable")
+                
                 if builder._check_basic_connectivity():
-                    self.logger.info(f"Map {map_id} connectivity fixed successfully by LLM")
+                    print(f"🎉 Map {map_id} connectivity fixed successfully by LLM")
                     messages.append({
                         "role": "user",
                         "content": "✅ Excellent! You've successfully fixed the connectivity issues. Your map is now fully connected."
                     })
                 else:
-                    self.logger.warning(f"Map {map_id} still has connectivity issues after LLM fix attempt")
+                    print(f"❌ Map {map_id} still has connectivity issues after LLM fix attempt")
+                    print(f"📊 Connectivity check failed: {new_reachable}/{total_accessible} tiles reachable")
                 
             except Exception as e:
-                self.logger.warning(f"LLM failed to fix connectivity: {e}")
+                print(f"💥 LLM failed to fix connectivity: {e}")
+                import traceback
+                print(f"📚 Full traceback: {traceback.format_exc()}")
         
         # Convert builder result to MapData
         try:
@@ -649,6 +671,52 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
         warning += "3. Ensure every room has at least one connection to other areas\n"
         
         return warning
+    
+    def _count_reachable_tiles(self, grid: List[List[str]]) -> int:
+        """Count how many floor/door tiles are reachable from the first accessible tile."""
+        if not grid:
+            return 0
+        
+        height = len(grid)
+        width = len(grid[0]) if grid else 0
+        
+        # Find first floor/door tile
+        start_pos = None
+        for i in range(height):
+            for j in range(width):
+                if grid[i][j] in ['.', '+']:
+                    start_pos = (i, j)
+                    break
+            if start_pos:
+                break
+        
+        if not start_pos:
+            return 0
+        
+        # Flood fill to count reachable tiles
+        visited = set()
+        stack = [start_pos]
+        reachable_count = 0
+        
+        while stack:
+            i, j = stack.pop()
+            if (i, j) in visited:
+                continue
+                
+            visited.add((i, j))
+            if grid[i][j] in ['.', '+']:
+                reachable_count += 1
+                
+                # Add neighbors
+                for di, dj in [(-1,0), (1,0), (0,-1), (0,1)]:
+                    ni, nj = i + di, j + dj
+                    if (0 <= ni < height and 
+                        0 <= nj < width and 
+                        (ni, nj) not in visited and
+                        grid[ni][nj] in ['.', '+']):
+                        stack.append((ni, nj))
+        
+        return reachable_count
     
     def _find_isolated_regions(self, grid: List[List[str]]) -> List[Dict[str, Any]]:
         """Find isolated regions in the grid."""
