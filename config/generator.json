@@ -1,0 +1,14 @@
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 0.7,
+    "max_retries": 3
+  },
+  "map_defaults": {
+    "width": 20,
+    "height": 15,
+    "min_wall_percentage": 0.2,
+    "max_wall_percentage": 0.8
+  }
+}

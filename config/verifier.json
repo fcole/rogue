@@ -1,0 +1,13 @@
+{
+  "llm": {
+    "provider": "ollama",
+    "model": "llama3.1:8b",
+    "endpoint": "http://localhost:11434",
+    "temperature": 0.3
+  },
+  "verification": {
+    "strictness": "medium",
+    "quantitative_weight": 0.6,
+    "qualitative_weight": 0.4
+  }
+}
