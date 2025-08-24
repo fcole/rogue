@@ -12,17 +12,32 @@ A system for generating and verifying roguelike maps using LLMs.
 ## Individual Commands
 
 - Generate maps: `python run.py 'generate --example --visualize'` (runs 10-prompt test suite)
+- Generate with tools (Claude): `python run.py 'generate --example --use-tools'`
+- Generate with tools (Ollama): `python run.py 'generate --example --use-ollama-tools'`
 - Verify maps: `python run.py 'verify --example'`
 - Generate report: `python run.py 'report'`
 - Custom prompt: `python run.py 'generate --prompt "your custom map description"'`
 
 ## Components
 
-- **Generator**: Converts text prompts to structured maps using Anthropic's Claude
+- **Generator**: Converts text prompts to structured maps using Anthropic's Claude or local Ollama LLM
 - **Verifier**: Validates maps match prompts using local Ollama LLM
+- **Tool-Based Generator**: Guarantees map constraints using function calling (Claude or Ollama)
 
 ## Configuration
 
 - `config/generator.json`: Map generation settings
 - `config/verifier.json`: Verification settings  
 - `config/secrets.json`: API keys (gitignored)
+
+## Local LLM Integration
+
+For local map generation using Ollama:
+
+1. **Install Ollama**: `curl -fsSL https://ollama.ai/install.sh | sh`
+2. **Download model**: `ollama pull deepseek-coder:33b-instruct`
+3. **Start service**: `ollama serve`
+4. **Test integration**: `python test_ollama_generator.py`
+5. **Generate maps**: `python run.py 'generate --example --use-ollama-tools'`
+
+See `OLLAMA_SETUP.md` for detailed setup instructions.
