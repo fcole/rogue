@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "Bash(PYTHONPATH=. python -m src.cli.main generate --example --visualize)",
+      "Bash(PYTHONPATH=. python -m src.cli.main verify --example)",
+      "Bash(PYTHONPATH=. python -m src.cli.main report)",
+      "Bash(PYTHONPATH=. python -m src.cli.main generate --prompt \"a simple tavern with clearer formatting\" --visualize)",
+      "Bash(git add:*)",
+      "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --prompt \"a simple tavern with clearer formatting\" --use-tools --visualize)",
+      "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --prompt \"a simple tavern with one goblin\" --use-tools --visualize)",
+      "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --example --use-tools --visualize)",
+      "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main verify --example)",
+      "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --prompt \"a small room with two goblins\" --use-tools --visualize)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

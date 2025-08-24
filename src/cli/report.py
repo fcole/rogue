@@ -262,7 +262,7 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                             </div>
                             <div class="detail-item">
                                 <strong>Connectivity</strong>
-                                {'✓ Connected' if map_data.metadata.get('connectivity_verified', False) else '✗ Disconnected'}
+                                {'✓ Connected' if ver_result.get('quantitative_checks', {}).get('connectivity', {}).get('passed', False) else '✗ Disconnected'}
                             </div>
                         </div>
                         

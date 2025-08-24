@@ -3,10 +3,22 @@ import time
 from typing import List, Dict, Any
 from ..shared.models import MapData, VerificationResult
 from ..shared.llm_client import LLMClient
-from ..shared.utils import load_config, visualize_map, count_tiles, validate_map_dimensions
+from ..shared.utils import load_config, visualize_map, count_tiles, validate_map_dimensions, validate_map_connectivity
 
 
 class MapVerifier:
+    """
+    Independent map verifier that re-verifies all properties without trusting generator metadata.
+    
+    This verifier runs its own checks for:
+    - Map dimensions
+    - Tile connectivity 
+    - Entity counts and placement
+    - Map structure and borders
+    - Tile distributions
+    
+    It never trusts any metadata flags from the generator, ensuring true verification.
+    """
     def __init__(self, config_file: str = "verifier.json"):
         self.config = load_config(config_file)
         llm_config = self.config["llm"].copy()
@@ -137,12 +149,23 @@ class MapVerifier:
         details["structure"] = structure_details
         score = min(score, score * (structure_score / 10.0))
         
-        # Connectivity check
-        if not map_data.metadata.get("connectivity_verified", False):
+        # Independent connectivity check - never trust generator metadata
+        connectivity_verified = self._check_map_connectivity(map_data)
+        if not connectivity_verified:
             details["connectivity"] = {"passed": False, "message": "Map not fully connected"}
             score -= 3.0
         else:
             details["connectivity"] = {"passed": True, "message": "Map fully connected"}
+        
+        # Independent entity placement verification
+        entity_placement_score, entity_placement_details = self._check_entity_placement(map_data)
+        details["entity_placement"] = entity_placement_details
+        score = min(score, score * (entity_placement_score / 10.0))
+        
+        # Independent map border verification
+        border_score, border_details = self._check_map_borders(map_data)
+        details["map_borders"] = border_details
+        score = min(score, score * (border_score / 10.0))
         
         return max(0.0, score), details
 
@@ -236,8 +259,8 @@ class MapVerifier:
         details = {}
         score = 10.0
         
-        # Analyze tile distribution
-        tile_counts = count_tiles(map_data.tiles)
+        # Independently analyze tile distribution - never trust generator metadata
+        tile_counts = self._count_tiles_independently(map_data)
         total_tiles = sum(tile_counts.values())
         wall_ratio = tile_counts["wall"] / total_tiles if total_tiles > 0 else 0
         
@@ -261,6 +284,114 @@ class MapVerifier:
                 details["density_match"] = {"expected": "open", "actual": "open", "passed": True}
         
         return score, details
+
+    def _count_tiles_independently(self, map_data: MapData) -> Dict[str, int]:
+        """Independently count tiles - never trust generator metadata."""
+        return count_tiles(map_data.tiles)
+
+    def _check_map_connectivity(self, map_data: MapData) -> bool:
+        """Independently check if the map is fully connected."""
+        # Always run our own connectivity check - never trust generator metadata
+        return validate_map_connectivity(map_data.tiles, map_data.width, map_data.height)
+
+    def _check_entity_placement(self, map_data: MapData) -> tuple[float, Dict[str, Any]]:
+        """Independently check if entity placement is logical."""
+        details = {}
+        score = 10.0
+        
+        lines = map_data.tiles.strip().split('\n')
+        
+        # Check if entities are within map bounds and on valid tiles
+        for entity_type, entity_list in map_data.entities.items():
+            for entity in entity_list:
+                # Check bounds
+                if entity.y >= len(lines) or entity.y < 0:
+                    score -= 1.0
+                    details[f"{entity_type.value}_bounds_error"] = {
+                        "passed": False, 
+                        "message": f"{entity_type.value} at ({entity.x},{entity.y}) outside map bounds"
+                    }
+                    continue
+                
+                if entity.x >= len(lines[entity.y]) or entity.x < 0:
+                    score -= 1.0
+                    details[f"{entity_type.value}_bounds_error"] = {
+                        "passed": False, 
+                        "message": f"{entity_type.value} at ({entity.x},{entity.y}) outside row bounds"
+                    }
+                    continue
+                
+                # Check if entity is on a valid tile type
+                tile_char = lines[entity.y][entity.x]
+                if tile_char != '.' and tile_char != '+':  # Only allow floor or door tiles
+                    score -= 1.0
+                    details[f"{entity_type.value}_tile_error"] = {
+                        "passed": False, 
+                        "message": f"{entity_type.value} at ({entity.x},{entity.y}) not on floor/door tile (found '{tile_char}')"
+                    }
+        
+        # Check for entity overlap (multiple entities in same position)
+        entity_positions = {}
+        for entity_type, entity_list in map_data.entities.items():
+            for entity in entity_list:
+                pos = (entity.x, entity.y)
+                if pos in entity_positions:
+                    score -= 1.0
+                    details["entity_overlap"] = {
+                        "passed": False, 
+                        "message": f"Multiple entities at position ({entity.x},{entity.y}): {entity_positions[pos]} and {entity_type.value}"
+                    }
+                else:
+                    entity_positions[pos] = entity_type.value
+        
+        return max(0.0, score), details
+
+    def _check_map_borders(self, map_data: MapData) -> tuple[float, Dict[str, Any]]:
+        """Independently check if map borders are valid."""
+        details = {}
+        score = 10.0
+        
+        lines = map_data.tiles.strip().split('\n')
+        
+        # Check if map has borders (this is optional, so we don't fail if missing)
+        has_borders = True
+        
+        # Check top border
+        if lines and not all(c == '#' for c in lines[0]):
+            has_borders = False
+            details["top_border"] = {"passed": False, "message": "Top border is not solid walls"}
+        else:
+            details["top_border"] = {"passed": True, "message": "Top border is solid walls"}
+        
+        # Check bottom border
+        if lines and not all(c == '#' for c in lines[-1]):
+            has_borders = False
+            details["bottom_border"] = {"passed": False, "message": "Bottom border is not solid walls"}
+        else:
+            details["bottom_border"] = {"passed": True, "message": "Bottom border is solid walls"}
+        
+        # Check left border
+        if lines and not all(len(line) > 0 and line[0] == '#' for line in lines):
+            has_borders = False
+            details["left_border"] = {"passed": False, "message": "Left border is not solid walls"}
+        else:
+            details["left_border"] = {"passed": True, "message": "Left border is solid walls"}
+        
+        # Check right border
+        if lines and not all(len(line) > 0 and line[-1] == '#' for line in lines):
+            has_borders = False
+            details["right_border"] = {"passed": False, "message": "Right border is not solid walls"}
+        else:
+            details["right_border"] = {"passed": True, "message": "Right border is solid walls"}
+        
+        # If borders are missing, reduce score but don't fail completely
+        if not has_borders:
+            score -= 1.0  # Minor penalty for missing borders
+            details["border_summary"] = {"passed": False, "message": "Map is missing some border walls"}
+        else:
+            details["border_summary"] = {"passed": True, "message": "Map has complete border walls"}
+        
+        return max(0.0, score), details
 
     def _build_verification_prompt(self, original_prompt: str, visualization: str) -> str:
         """Build the verification prompt for the local LLM."""
