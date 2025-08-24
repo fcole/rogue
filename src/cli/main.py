@@ -7,6 +7,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from ..generator.map_generator import MapGenerator
+from ..generator.tool_based_generator import ToolBasedMapGenerator
 from ..verifier.map_verifier import MapVerifier
 from ..shared.models import MapData
 from ..shared.utils import visualize_map
@@ -28,7 +29,8 @@ def main():
 @click.option("--output", "-o", type=click.Path(), default="data/generated", help="Output directory")
 @click.option("--example", is_flag=True, help="Run with example prompts")
 @click.option("--visualize", is_flag=True, help="Print visual representation of maps")
-def generate(prompts, prompt, output, example, visualize):
+@click.option("--use-tools", is_flag=True, help="Use tool-based generator (guarantees constraints)")
+def generate(prompts, prompt, output, example, visualize, use_tools):
     """Generate roguelike maps from text prompts."""
     
     # Determine prompts to use
@@ -54,10 +56,13 @@ def generate(prompts, prompt, output, example, visualize):
         console.print("[red]Error: Must specify --prompts, --prompt, or --example[/red]")
         return
     
-    console.print(f"[green]Generating maps for {len(prompts_list)} prompts...[/green]")
+    console.print(f"[green]Generating maps for {len(prompts_list)} prompts using {'tool-based' if use_tools else 'prompt-based'} generator...[/green]")
     
     # Create generator and generate maps
-    generator = MapGenerator()
+    if use_tools:
+        generator = ToolBasedMapGenerator()
+    else:
+        generator = MapGenerator()
     
     with Progress(
         SpinnerColumn(),
