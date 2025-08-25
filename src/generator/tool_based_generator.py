@@ -441,7 +441,15 @@ class ToolBasedMapGenerator:
             "role": "user",
             "content": f"""Create a roguelike map for this prompt: "{prompt}"
 
-CONNECTIVITY IS CRITICAL - READ CAREFULLY:
+CRITICAL REQUIREMENTS - READ CAREFULLY:
+
+🎮 PLAYER PLACEMENT (ALWAYS REQUIRED):
+- EVERY map MUST have exactly ONE player entity
+- Use place_entity("player", x, y) to place the player
+- Player must be on a floor tile (.) or door tile (+)
+- Maps without players are unplayable and will fail verification!
+
+🔗 CONNECTIVITY IS CRITICAL:
 - Every floor tile (.) must be reachable from every other floor tile
 - After placing each room, think: 'How does someone get here?'
 - Use place_corridor(x1,y1,x2,y2) to connect separated areas
@@ -450,14 +458,17 @@ CONNECTIVITY IS CRITICAL - READ CAREFULLY:
 AVOID THESE MISTAKES:
 ❌ Don't create walled-off 'ponds' or 'islands' without connections
 ❌ Don't place rooms without doors or corridors
+❌ Don't forget to place a player entity (CRITICAL!)
 ✅ DO connect every room to the main area with doors or corridors
+✅ DO always place exactly one player entity
 
 BUILDING STEPS:
 1. First create_grid(20, 15) to initialize 
 2. Use place_room to create rooms for the scene
 3. Use place_door and place_corridor to connect spaces
 4. Use place_entity to add characters and objects
-5. Finish efficiently - avoid unnecessary status checks
+5. ALWAYS use place_entity("player", x, y) to add a player
+6. Finish efficiently - avoid unnecessary status checks
 
 CONNECTIVITY EXAMPLES:
 ✅ GOOD: Rooms connected by doors/corridors
@@ -465,7 +476,7 @@ CONNECTIVITY EXAMPLES:
 
 If you create a 'pond' or 'separate area', add a corridor or door to connect it!
 
-Build a map that matches the prompt creatively while ensuring proper connectivity."""
+Build a map that matches the prompt creatively while ensuring proper connectivity AND player placement."""
         }]
         
         max_iterations = 10  # Reduced from 20
@@ -594,6 +605,72 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
                 print(f"💥 LLM failed to fix connectivity: {e}")
                 import traceback
                 print(f"📚 Full traceback: {traceback.format_exc()}")
+        
+        # Check for player placement and give LLM feedback if missing
+        if not builder.entities.get("player"):
+            print(f"\n🎮 PLAYER PLACEMENT DEBUG: Map {map_id} is missing a player entity!")
+            
+            messages.append({
+                "role": "user",
+                "content": f"""🎮 CRITICAL: Your map is missing a player entity!
+
+Every roguelike map MUST have exactly one player entity for the player to start the game.
+
+CURRENT STATUS:
+- Map has {len(builder.entities.get('ogre', []))} ogres
+- Map has {len(builder.entities.get('goblin', []))} goblins  
+- Map has {len(builder.entities.get('shop', []))} shops
+- Map has {len(builder.entities.get('chest', []))} chests
+- ❌ Map has 0 players (REQUIRED!)
+
+ACTION REQUIRED:
+Use place_entity("player", x, y) to place a player at valid coordinates (x,y) on a floor tile (.) or door tile (+).
+
+EXAMPLE:
+place_entity("player", 10, 7)  # Places player at center of map
+
+This is a critical requirement - maps without players are unplayable!"""
+            })
+            
+            # Give LLM a chance to add the player
+            try:
+                print(f"🤖 Sending player placement request to LLM...")
+                response = self.client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=1000,
+                    tools=self.tools,
+                    messages=messages
+                )
+                
+                print(f"📨 LLM response received. Stop reason: {response.stop_reason}")
+                
+                # Process any tool calls to add player
+                if response.stop_reason == "tool_use":
+                    print("🔧 Processing tool calls for player placement...")
+                    for content_block in response.content:
+                        if content_block.type == "tool_use":
+                            print(f"🛠️ Tool call: {content_block.name} with input: {content_block.input}")
+                            result = self._execute_tool(
+                                content_block.name,
+                                content_block.input,
+                                builder
+                            )
+                            print(f"✅ Tool execution result: {result}")
+                
+                # Check if player was added
+                if builder.entities.get("player"):
+                    print(f"🎉 Map {map_id} player added successfully by LLM")
+                    messages.append({
+                        "role": "user",
+                        "content": "✅ Excellent! You've successfully added a player entity. Your map is now playable."
+                    })
+                else:
+                    print(f"❌ Map {map_id} still missing player after LLM fix attempt")
+                    print(f"⚠️ WARNING: This map will fail verification due to missing player!")
+                
+            except Exception as e:
+                print(f"💥 LLM failed to add player: {e}")
+                print(f"⚠️ WARNING: This map will fail verification due to missing player!")
         
         # Convert builder result to MapData
         try:

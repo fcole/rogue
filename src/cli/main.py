@@ -221,13 +221,17 @@ def verify(maps, prompts, results, output, example):
         if not result.quantitative_checks.get("dimension_errors", {}).get("passed", True):
             issues.append("DIMENSION ERRORS")
         
+        # Check for critical entity failures (like missing player)
+        critical_entity_failures = []
+        for entity_type, check in result.quantitative_checks.get("entity_counts", {}).items():
+            if check.get("critical", False) and not check.get("passed", True):
+                critical_entity_failures.append(f"NO {entity_type.upper()}")
+        
+        if critical_entity_failures:
+            issues.extend(critical_entity_failures)
+        
         if not result.quantitative_checks.get("connectivity", {}).get("passed", True):
             issues.append("connectivity")
-        
-        entity_issues = sum(1 for check in result.quantitative_checks.get("entity_counts", {}).values()
-                           if not check.get("passed", True))
-        if entity_issues > 0:
-            issues.append(f"{entity_issues} entity issues")
         
         table.add_row(
             result.test_id,

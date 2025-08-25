@@ -382,14 +382,42 @@ class OllamaToolBasedGenerator:
             "role": "user",
             "content": f"""Create a roguelike map for this prompt: "{prompt}"
 
-Use the available tools to build the map step by step:
+CRITICAL REQUIREMENTS - READ CAREFULLY:
+
+🎮 PLAYER PLACEMENT (ALWAYS REQUIRED):
+- EVERY map MUST have exactly ONE player entity
+- Use place_entity("player", x, y) to place the player
+- Player must be on a floor tile (.) or door tile (+)
+- Maps without players are unplayable and will fail verification!
+
+🔗 CONNECTIVITY IS CRITICAL:
+- Every floor tile (.) must be reachable from every other floor tile
+- After placing each room, think: 'How does someone get here?'
+- Use place_corridor(x1,y1,x2,y2) to connect separated areas
+- Use place_door(x,y) to create doorways between rooms
+
+AVOID THESE MISTAKES:
+❌ Don't create walled-off 'ponds' or 'islands' without connections
+❌ Don't place rooms without doors or corridors
+❌ Don't forget to place a player entity (CRITICAL!)
+✅ DO connect every room to the main area with doors or corridors
+✅ DO always place exactly one player entity
+
+BUILDING STEPS:
 1. First create_grid(20, 15) to initialize 
 2. Use place_room to create rooms for the scene
 3. Use place_door and place_corridor to connect spaces
 4. Use place_entity to add characters and objects
-5. Finish efficiently - avoid unnecessary status checks
+5. ALWAYS use place_entity("player", x, y) to add a player
+6. Finish efficiently - avoid unnecessary status checks
 
-Build a map that matches the prompt creatively while ensuring proper connectivity."""
+CONNECTIVITY EXAMPLES:
+✅ GOOD: Rooms connected by doors/corridors
+❌ BAD: Isolated rooms with no connections
+
+If you create a 'pond' or 'separate area', add a corridor or door to connect it!
+
+Build a map that matches the prompt creatively while ensuring proper connectivity AND player placement."""
         }]
         
         max_iterations = 10
@@ -443,6 +471,126 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
         
         if iteration >= max_iterations:
             self.logger.warning(f"Map generation hit iteration limit for {map_id}")
+        
+        # Check connectivity and give LLM a chance to fix issues
+        if not builder._check_basic_connectivity():
+            print(f"\n🔍 CONNECTIVITY DEBUG: Map {map_id} has connectivity issues")
+            
+            # Log detailed connectivity analysis
+            total_accessible = sum(row.count('.') + row.count('+') for row in builder.grid)
+            reachable_count = self._count_reachable_tiles(builder.grid)
+            print(f"📊 Connectivity analysis: {reachable_count}/{total_accessible} tiles reachable")
+            
+            # Send connectivity warning with specific guidance
+            connectivity_warning = self._generate_connectivity_warning(builder)
+            print(f"⚠️ Connectivity warning: {connectivity_warning}")
+            
+            messages.append({
+                "role": "user",
+                "content": f"""⚠️ CONNECTIVITY WARNING: Your map has isolated areas that cannot be reached!
+
+{connectivity_warning}
+
+Use place_corridor() or place_door() to connect separated regions. Fix this connectivity issue and continue building."""
+            })
+            
+            # Give LLM another chance to fix connectivity
+            try:
+                print(f"🤖 Sending connectivity fix request to LLM...")
+                response = self._call_ollama_with_functions(messages) # Re-call Ollama to get updated messages
+                print(f"📨 LLM response received")
+                
+                # Process any tool calls to fix connectivity
+                tool_calls = response.get("tool_calls", []) # Extract tool calls from the new response
+                if tool_calls:
+                    print("🔧 Processing tool calls for connectivity fix...")
+                    for tool_call in tool_calls:
+                        print(f"🛠️ Tool call: {tool_call['name']} with input: {tool_call['args']}") # Use tool_call['args'] for arguments
+                        result = self._execute_tool(
+                            tool_call['name'],
+                            tool_call['args'],
+                            builder
+                        )
+                        print(f"✅ Tool execution result: {result}")
+                
+                # Check if connectivity was fixed
+                new_reachable = self._count_reachable_tiles(builder.grid)
+                print(f"📊 After fix attempt: {new_reachable}/{total_accessible} tiles reachable")
+                
+                if builder._check_basic_connectivity():
+                    print(f"🎉 Map {map_id} connectivity fixed successfully by LLM")
+                    messages.append({
+                        "role": "user",
+                        "content": "✅ Excellent! You've successfully fixed the connectivity issues. Your map is now fully connected."
+                    })
+                else:
+                    print(f"❌ Map {map_id} still has connectivity issues after LLM fix attempt")
+                    print(f"📊 Connectivity check failed: {new_reachable}/{total_accessible} tiles reachable")
+                
+            except Exception as e:
+                print(f"💥 LLM failed to fix connectivity: {e}")
+                import traceback
+                print(f"📚 Full traceback: {traceback.format_exc()}")
+        
+        # Check for player placement and give LLM feedback if missing
+        if not builder.entities.get("player"):
+            print(f"\n🎮 PLAYER PLACEMENT DEBUG: Map {map_id} is missing a player entity!")
+            
+            messages.append({
+                "role": "user",
+                "content": f"""🎮 CRITICAL: Your map is missing a player entity!
+
+Every roguelike map MUST have exactly one player entity for the player to start the game.
+
+CURRENT STATUS:
+- Map has {len(builder.entities.get('ogre', []))} ogres
+- Map has {len(builder.entities.get('goblin', []))} goblins  
+- Map has {len(builder.entities.get('shop', []))} shops
+- Map has {len(builder.entities.get('chest', []))} chests
+- ❌ Map has 0 players (REQUIRED!)
+
+ACTION REQUIRED:
+Use place_entity("player", x, y) to place a player at valid coordinates (x,y) on a floor tile (.) or door tile (+).
+
+EXAMPLE:
+place_entity("player", 10, 7)  # Places player at center of map
+
+This is a critical requirement - maps without players are unplayable!"""
+            })
+            
+            # Give LLM a chance to add the player
+            try:
+                print(f"🤖 Sending player placement request to LLM...")
+                response = self._call_ollama_with_functions(messages) # Re-call Ollama to get updated messages
+                print(f"📨 LLM response received")
+                
+                # Process any tool calls to add player
+                tool_calls = response.get("tool_calls", []) # Extract tool calls from the new response
+                if tool_calls:
+                    print("🔧 Processing tool calls for player placement...")
+                    for tool_call in tool_calls:
+                        print(f"🛠️ Tool call: {tool_call['name']} with input: {tool_call['args']}") # Use tool_call['args'] for arguments
+                        result = self._execute_tool(
+                            tool_call['name'],
+                            tool_call['args'],
+                            builder
+                        )
+                        print(f"✅ Tool execution result: {result}")
+                
+                # Check if player was added
+                if builder.entities.get("player"):
+                    print(f"🎉 Map {map_id} player added successfully by LLM")
+                    messages.append({
+                        "role": "user",
+                        "content": "✅ Excellent! You've successfully added a player entity. Your map is now playable."
+                    })
+                else:
+                    print(f"❌ Map {map_id} still missing player after LLM fix attempt")
+                    print(f"⚠️ WARNING: This map will fail verification due to missing player!")
+                
+            except Exception as e:
+                print(f"💥 LLM failed to add player: {e}")
+                print(f"⚠️ WARNING: This map will fail verification due to missing player!")
         
         # Convert builder result to MapData
         try:

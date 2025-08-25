@@ -107,8 +107,18 @@ class MapVerifier:
                 overall_score = 0.0
                 passed = False
             else:
-                # Determine if passed (simple threshold for dimensionally valid maps)
-                passed = overall_score >= 6.0
+                # Check for critical entity failures (like missing player)
+                critical_entity_failures = any(
+                    check.get("critical", False) and not check.get("passed", True)
+                    for check in quantitative_details.get("entity_counts", {}).values()
+                )
+                
+                if critical_entity_failures:
+                    overall_score = 0.0
+                    passed = False
+                else:
+                    # Determine if passed (simple threshold for dimensionally valid maps)
+                    passed = overall_score >= 6.0
             
             return VerificationResult(
                 test_id=test_id,
@@ -140,9 +150,17 @@ class MapVerifier:
         entity_checks = self._check_entity_counts(prompt, map_data)
         details["entity_counts"] = entity_checks
         
-        for check in entity_checks.values():
-            if not check.get("passed", True):
+        # Check for critical entity failures (like missing player)
+        critical_failures = []
+        for entity_type, check in entity_checks.items():
+            if check.get("critical", False) and not check.get("passed", True):
+                critical_failures.append(f"Missing {entity_type}")
+            elif not check.get("passed", True):
                 score -= 2.0  # Deduct points for failed entity checks
+        
+        # If there are critical failures, significantly reduce score
+        if critical_failures:
+            score -= 5.0  # Heavy penalty for critical failures like missing player
         
         # Map structure checks
         structure_score, structure_details = self._check_map_structure(prompt, map_data)
@@ -251,6 +269,15 @@ class MapVerifier:
                     "actual": actual_count,
                     "passed": actual_count == expected_count
                 }
+        
+        # CRITICAL: Always check for player entity - maps without players are unplayable
+        player_count = len(map_data.entities.get("player", []))
+        checks["player"] = {
+            "expected": 1,
+            "actual": player_count,
+            "passed": player_count == 1,
+            "critical": True  # Mark as critical requirement
+        }
         
         return checks
 
