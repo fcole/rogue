@@ -37,7 +37,8 @@ class GridBuilder:
             for j in range(1, width - 1):
                 self.grid[i][j] = '.'
                 
-        return f"Created {width}x{height} grid with border walls"
+        visualization = self._get_grid_visualization()
+        return f"Created {width}x{height} grid with border walls\n\nCurrent map:\n{visualization}"
     
     def place_room(self, x: int, y: int, width: int, height: int) -> str:
         """Create a rectangular room with walls and floor."""
@@ -60,7 +61,8 @@ class GridBuilder:
         # Check if this room might be isolated and provide guidance
         isolation_warning = self._check_room_isolation_warning(x, y, width, height)
         
-        return f"Placed {width}x{height} room at ({x},{y}){isolation_warning}"
+        visualization = self._get_grid_visualization()
+        return f"Placed {width}x{height} room at ({x},{y}){isolation_warning}\n\nCurrent map:\n{visualization}"
     
     def _check_room_isolation_warning(self, x: int, y: int, width: int, height: int) -> str:
         """Check if a room might be isolated and provide guidance."""
@@ -110,7 +112,8 @@ class GridBuilder:
             return f"Error: Invalid coordinates ({x},{y})"
         
         self.grid[y][x] = '+'
-        return f"Placed door at ({x},{y})"
+        visualization = self._get_grid_visualization()
+        return f"Placed door at ({x},{y})\n\nCurrent map:\n{visualization}"
     
     def place_corridor(self, x1: int, y1: int, x2: int, y2: int) -> str:
         """Create a corridor between two points."""
@@ -130,7 +133,8 @@ class GridBuilder:
             if self._in_bounds(x2, y):
                 self.grid[y][x2] = '.'
                 
-        return f"Created corridor from ({x1},{y1}) to ({x2},{y2})"
+        visualization = self._get_grid_visualization()
+        return f"Created corridor from ({x1},{y1}) to ({x2},{y2})\n\nCurrent map:\n{visualization}"
     
     def place_entity(self, entity_type: str, x: int, y: int, properties: Optional[Dict] = None) -> str:
         """Place an entity at the specified coordinates."""
@@ -193,7 +197,18 @@ class GridBuilder:
         floor_count = sum(row.count('.') for row in self.grid)
         door_count = sum(row.count('+') for row in self.grid)
         
-        return f"Grid: {width}x{height}, Walls: {wall_count}, Floors: {floor_count}, Doors: {door_count}"
+        visualization = self._get_grid_visualization()
+        return f"Grid: {width}x{height}, Walls: {wall_count}, Floors: {floor_count}, Doors: {door_count}\n\nCurrent map:\n{visualization}"
+    
+    def _get_grid_visualization(self) -> str:
+        """Get ASCII visualization of current grid state."""
+        if not self.grid:
+            return "No grid created yet"
+        
+        lines = []
+        for row in self.grid:
+            lines.append(''.join(row))
+        return '\n'.join(lines)
     
     def _validate_bounds(self, x: int, y: int, width: int, height: int) -> bool:
         """Check if a rectangle fits within grid bounds."""
