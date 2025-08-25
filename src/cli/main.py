@@ -6,7 +6,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from ..generator.map_generator import MapGenerator
 from ..generator.tool_based_generator import ToolBasedMapGenerator
 from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
 from ..verifier.map_verifier import MapVerifier
@@ -30,9 +29,8 @@ def main():
 @click.option("--output", "-o", type=click.Path(), default="data/generated", help="Output directory")
 @click.option("--example", is_flag=True, help="Run with example prompts")
 @click.option("--visualize", is_flag=True, help="Print visual representation of maps")
-@click.option("--use-tools", is_flag=True, help="Use Claude tool-based generator (guarantees constraints)")
-@click.option("--use-ollama-tools", is_flag=True, help="Use Ollama tool-based generator (local, guarantees constraints)")
-def generate(prompts, prompt, output, example, visualize, use_tools, use_ollama_tools):
+@click.option("--use-ollama-tools", is_flag=False, help="Use Ollama tool-based generator (local, guarantees constraints)")
+def generate(prompts, prompt, output, example, visualize, use_ollama_tools):
     """Generate roguelike maps from text prompts."""
     
     # Determine prompts to use
@@ -62,12 +60,9 @@ def generate(prompts, prompt, output, example, visualize, use_tools, use_ollama_
     if use_ollama_tools:
         generator_type = "Ollama tool-based"
         generator = OllamaToolBasedGenerator()
-    elif use_tools:
+    else:
         generator_type = "Claude tool-based"
         generator = ToolBasedMapGenerator()
-    else:
-        generator_type = "prompt-based"
-        generator = MapGenerator()
     
     console.print(f"[green]Generating maps for {len(prompts_list)} prompts using {generator_type} generator...[/green]")
     

@@ -69,7 +69,7 @@ def main():
     
     # Step 1: Generate maps from test suite
     if args.generate:
-        if run_command("generate --example --visualize --use-tools", "Generating maps from test suite") != 0:
+        if run_command("generate --example --visualize", "Generating maps from test suite") != 0:
             sys.exit(1)
     
     # Step 2: Verify all generated maps
