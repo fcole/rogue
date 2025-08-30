@@ -6,11 +6,11 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from ..generator.tool_based_generator import ToolBasedMapGenerator
-from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
+"""CLI entrypoint with lazy imports for optional providers."""
+from ..generator.smart_positioning_generator import SmartPositioningGenerator
 from ..verifier.map_verifier import MapVerifier
 from ..shared.models import MapData
-from ..shared.utils import visualize_map
+from ..shared.utils import visualize_map, load_config
 from .report import report
 
 
@@ -29,8 +29,11 @@ def main():
 @click.option("--output", "-o", type=click.Path(), default="data/generated", help="Output directory")
 @click.option("--example", is_flag=True, help="Run with example prompts")
 @click.option("--visualize", is_flag=True, help="Print visual representation of maps")
-@click.option("--use-ollama-tools", is_flag=False, help="Use Ollama tool-based generator (local, guarantees constraints)")
-def generate(prompts, prompt, output, example, visualize, use_ollama_tools):
+@click.option("--use-ollama-tools", is_flag=True, help="Use Ollama tool-based generator (local, guarantees constraints)")
+@click.option("--use-tools", is_flag=True, help="Use Claude tool-based generator (Anthropic)")
+@click.option("--use-smart-positioning", is_flag=True, help="Use smart positioning generator (easier for LLMs)")
+@click.option("--ollama-endpoint", type=str, help="Override Ollama endpoint, e.g., http://host.docker.internal:11434")
+def generate(prompts, prompt, output, example, visualize, use_ollama_tools, use_tools, use_smart_positioning, ollama_endpoint):
     """Generate roguelike maps from text prompts."""
     
     # Determine prompts to use
@@ -56,13 +59,46 @@ def generate(prompts, prompt, output, example, visualize, use_ollama_tools):
         console.print("[red]Error: Must specify --prompts, --prompt, or --example[/red]")
         return
     
-    # Determine generator type
-    if use_ollama_tools:
-        generator_type = "Ollama tool-based"
-        generator = OllamaToolBasedGenerator()
+    # Optional endpoint override for Ollama
+    if ollama_endpoint:
+        import os
+        os.environ["OLLAMA_ENDPOINT"] = ollama_endpoint
+
+    # Determine generator type (lazy import to avoid optional deps unless needed)
+    if use_smart_positioning:
+        generator_type = "Smart positioning"
+        generator = SmartPositioningGenerator()
     else:
-        generator_type = "Claude tool-based"
-        generator = ToolBasedMapGenerator()
+        # Choose explicit via flags first
+        if use_ollama_tools:
+            from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
+            generator_type = "Ollama tool-based"
+            generator = OllamaToolBasedGenerator()
+        elif use_tools:
+            from ..generator.tool_based_generator import ToolBasedMapGenerator
+            generator_type = "Claude tool-based"
+            generator = ToolBasedMapGenerator()
+        else:
+            # Default from config: prefer provider in generator.json
+            try:
+                cfg = load_config("generator.json")
+                provider = (cfg.get("llm", {}).get("provider") or "ollama").lower()
+            except Exception:
+                provider = "ollama"
+            if provider == "anthropic":
+                try:
+                    from ..generator.tool_based_generator import ToolBasedMapGenerator
+                    generator_type = "Claude tool-based"
+                    generator = ToolBasedMapGenerator()
+                except Exception as e:
+                    console.print(f"[yellow]Falling back to Ollama tool-based generator: {e}[/yellow]")
+                    from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
+                    generator_type = "Ollama tool-based"
+                    generator = OllamaToolBasedGenerator()
+            else:
+                from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
+                generator_type = "Ollama tool-based"
+                generator = OllamaToolBasedGenerator()
     
     console.print(f"[green]Generating maps for {len(prompts_list)} prompts using {generator_type} generator...[/green]")
     
@@ -131,7 +167,8 @@ def generate(prompts, prompt, output, example, visualize, use_ollama_tools):
 @click.option("--results", type=click.Path(exists=True), help="Generation results JSON file")
 @click.option("--output", "-o", type=click.Path(), default="data/verification", help="Output directory")
 @click.option("--example", is_flag=True, help="Verify example maps (must run generate --example first)")
-def verify(maps, prompts, results, output, example):
+@click.option("--ollama-endpoint", type=str, help="Override Ollama endpoint for verifier LLM")
+def verify(maps, prompts, results, output, example, ollama_endpoint):
     """Verify that generated maps match their prompts."""
     
     test_cases = []
@@ -178,6 +215,11 @@ def verify(maps, prompts, results, output, example):
         console.print("[red]Error: No test cases found to verify[/red]")
         return
     
+    # Optional endpoint override for verifier
+    if ollama_endpoint:
+        import os
+        os.environ["OLLAMA_ENDPOINT"] = ollama_endpoint
+
     console.print(f"[green]Verifying {len(test_cases)} maps...[/green]")
     
     # Create verifier and verify maps

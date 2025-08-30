@@ -1,8 +1,8 @@
 import json
+import os
 import requests
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-import anthropic
 from .utils import load_secrets
 
 
@@ -23,8 +23,19 @@ class LLMClient(ABC):
 
 class AnthropicClient(LLMClient):
     def __init__(self, model: str, temperature: float = 0.7, **kwargs):
-        secrets = load_secrets()
-        self.client = anthropic.Anthropic(api_key=secrets["anthropic_api_key"])
+        secrets = {}
+        try:
+            secrets = load_secrets()
+        except Exception:
+            secrets = {}
+        api_key = secrets.get("anthropic_api_key")
+        try:
+            import anthropic  # lazy import to avoid hard dependency when unused
+        except Exception as e:
+            raise Exception("Anthropic SDK not installed. Run 'pip install anthropic'.") from e
+        if not api_key:
+            raise Exception("Missing Anthropic API key in config/secrets.json (anthropic_api_key)")
+        self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
         self.temperature = temperature
 
@@ -45,8 +56,8 @@ class AnthropicClient(LLMClient):
 class OllamaClient(LLMClient):
     def __init__(self, model: str, endpoint: str = "http://localhost:11434", 
                  temperature: float = 0.3, **kwargs):
-        self.model = model
-        self.endpoint = endpoint
+        self.model = os.getenv("OLLAMA_MODEL", model)
+        self.endpoint = os.getenv("OLLAMA_ENDPOINT", endpoint)
         self.temperature = temperature
 
     def query(self, prompt: str, system_prompt: str = "") -> str:

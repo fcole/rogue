@@ -1,7 +1,7 @@
 import json
 import time
 from typing import List, Dict, Any
-from ..shared.models import MapData, VerificationResult
+from ..shared.models import MapData, VerificationResult, EntityType
 from ..shared.llm_client import LLMClient
 from ..shared.utils import load_config, visualize_map, count_tiles, validate_map_dimensions, validate_map_connectivity
 
@@ -236,8 +236,20 @@ class MapVerifier:
             "chest": ["chest", "treasure"]
         }
         
+        def _count_entities(mt: MapData, et: EntityType) -> int:
+            # Accept both Enum and string keys for robustness
+            return len(
+                mt.entities.get(et, []) or mt.entities.get(et.value, [])
+            )
+
         for entity_type, keywords in entity_keywords.items():
-            actual_count = len(map_data.entities.get(entity_type, []))
+            enum_key = EntityType(entity_type) if entity_type in EntityType.__members__.values() else None
+            # If above check doesn't work due to Enum API, construct directly
+            try:
+                enum_key = EntityType(entity_type)
+            except Exception:
+                enum_key = None
+            actual_count = _count_entities(map_data, enum_key or EntityType(entity_type))
             
             # Extract expected count from prompt
             expected_count = 0
@@ -271,7 +283,7 @@ class MapVerifier:
                 }
         
         # CRITICAL: Always check for player entity - maps without players are unplayable
-        player_count = len(map_data.entities.get("player", []))
+        player_count = _count_entities(map_data, EntityType.PLAYER)
         checks["player"] = {
             "expected": 1,
             "actual": player_count,

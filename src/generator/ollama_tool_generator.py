@@ -3,6 +3,7 @@ Ollama-based tool generator that uses function calling to guarantee constraints.
 Compatible with the existing ToolBasedMapGenerator interface.
 """
 import json
+import os
 import logging
 import time
 from typing import Dict, Any, List, Optional, Tuple
@@ -175,7 +176,19 @@ class OllamaGridBuilder:
         
         # Verify connectivity (simple check)
         connectivity_verified = self._check_basic_connectivity()
-        
+        # Base metadata plus any collected runtime metadata
+        meta = {
+            "wall_count": wall_count,
+            "floor_count": floor_count,
+            "door_count": door_count,
+            "connectivity_verified": connectivity_verified
+        }
+        if self.metadata:
+            try:
+                meta.update(self.metadata)
+            except Exception:
+                pass
+
         return MapData(
             id=map_id,
             prompt=prompt,
@@ -183,12 +196,7 @@ class OllamaGridBuilder:
             height=self.target_height,
             tiles=tiles,
             entities=self.entities,
-            metadata={
-                "wall_count": wall_count,
-                "floor_count": floor_count,
-                "door_count": door_count,
-                "connectivity_verified": connectivity_verified
-            },
+            metadata=meta,
             generated_at=datetime.now().isoformat()
         )
     
@@ -211,12 +219,14 @@ class OllamaToolBasedGenerator:
         self.logger = logging.getLogger(__name__)
         
         # Ollama configuration
-        self.ollama_endpoint = self.config.get("ollama", {}).get("endpoint", "http://localhost:11434")
-        self.model = self.config.get("ollama", {}).get("model", "deepseek-coder:33b-instruct")
+        cfg_endpoint = self.config.get("ollama", {}).get("endpoint", "http://localhost:11434")
+        cfg_model = self.config.get("ollama", {}).get("model", "deepseek-coder:33b-instruct")
+        self.ollama_endpoint = os.getenv("OLLAMA_ENDPOINT", cfg_endpoint)
+        self.model = os.getenv("OLLAMA_MODEL", cfg_model)
         self.temperature = self.config.get("ollama", {}).get("temperature", 0.3)
         
-        # Tool definitions in Ollama function calling format
-        self.tools = [
+        # Tool definitions in Ollama function-calling format (OpenAI-compatible)
+        base_tools = [
             {
                 "name": "create_grid",
                 "description": "Initialize a new grid with specified dimensions (must be exactly 20x15)",
@@ -318,6 +328,12 @@ class OllamaToolBasedGenerator:
                 "parameters": {"type": "object", "properties": {}}
             }
         ]
+
+        # Wrap tools with type:function for Ollama /api/chat compatibility
+        self.tools = [{
+            "type": "function",
+            "function": t
+        } for t in base_tools]
     
     def generate_maps(self, prompts: List[str]) -> Dict[str, Any]:
         """Generate maps for multiple prompts (interface compatibility with ToolBasedMapGenerator)."""
@@ -377,48 +393,25 @@ class OllamaToolBasedGenerator:
         self.logger.info(f"Generating map {map_id} with Ollama tools: {prompt}")
         
         builder = OllamaGridBuilder()
+        executed_tool_calls: List[str] = []
         
-        messages = [{
-            "role": "user",
-            "content": f"""Create a roguelike map for this prompt: "{prompt}"
-
-CRITICAL REQUIREMENTS - READ CAREFULLY:
-
-🎮 PLAYER PLACEMENT (ALWAYS REQUIRED):
-- EVERY map MUST have exactly ONE player entity
-- Use place_entity("player", x, y) to place the player
-- Player must be on a floor tile (.) or door tile (+)
-- Maps without players are unplayable and will fail verification!
-
-🔗 CONNECTIVITY IS CRITICAL:
-- Every floor tile (.) must be reachable from every other floor tile
-- After placing each room, think: 'How does someone get here?'
-- Use place_corridor(x1,y1,x2,y2) to connect separated areas
-- Use place_door(x,y) to create doorways between rooms
-
-AVOID THESE MISTAKES:
-❌ Don't create walled-off 'ponds' or 'islands' without connections
-❌ Don't place rooms without doors or corridors
-❌ Don't forget to place a player entity (CRITICAL!)
-✅ DO connect every room to the main area with doors or corridors
-✅ DO always place exactly one player entity
-
-BUILDING STEPS:
-1. First create_grid(20, 15) to initialize 
-2. Use place_room to create rooms for the scene
-3. Use place_door and place_corridor to connect spaces
-4. Use place_entity to add characters and objects
-5. ALWAYS use place_entity("player", x, y) to add a player
-6. Finish efficiently - avoid unnecessary status checks
-
-CONNECTIVITY EXAMPLES:
-✅ GOOD: Rooms connected by doors/corridors
-❌ BAD: Isolated rooms with no connections
-
-If you create a 'pond' or 'separate area', add a corridor or door to connect it!
-
-Build a map that matches the prompt creatively while ensuring proper connectivity AND player placement."""
-        }]
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a tool-using map builder. Always respond by calling the provided tools. "
+                    "Do not write prose. The first step must be create_grid with width=20 and height=15."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Prompt: {prompt}\n"
+                    "Goals: Build a connected 20x15 map, then place exactly one player on a floor or door tile. "
+                    "Use place_room/place_door/place_corridor to ensure connectivity."
+                ),
+            },
+        ]
         
         max_iterations = 10
         iteration = 0
@@ -437,32 +430,63 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
                 
                 # Check if Ollama wants to use tools
                 if response.get("tool_calls"):
-                    tool_results = []
-                    
+                    # Execute tool calls and summarize results back plainly
+                    summary_lines = []
                     for tool_call in response["tool_calls"]:
                         result = self._execute_tool(
                             tool_call["name"],
-                            tool_call["args"],
-                            builder
+                            tool_call.get("args", {}),
+                            builder,
                         )
-                        
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_call_id": tool_call["id"],
-                            "content": result
-                        })
-                    
-                    # Send tool results back to Ollama
-                    messages.append({
-                        "role": "user",
-                        "content": tool_results
-                    })
+                        executed_tool_calls.append(tool_call["name"])
+                        summary_lines.append(
+                            f"{tool_call['name']}({tool_call.get('args', {})}) -> {result}"
+                        )
+
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "TOOL RESULTS:\n" + "\n".join(summary_lines) + "\nContinue building using tools."
+                            ),
+                        }
+                    )
                     
                     iteration += 1
                     continue
                     
                 else:
-                    # Ollama is done with tool calls
+                    # No tool calls returned. Try a one-time pseudo-tool nudge to kickstart create_grid.
+                    if iteration == 0 and not builder.grid:
+                        pseudo = self._call_ollama_pseudo_tools(
+                            messages
+                            + [{
+                                "role": "user",
+                                "content": "Emit a JSON tool call to create_grid with width 20 and height 15.",
+                            }]
+                        )
+                        pseudo_calls = pseudo.get("tool_calls", [])
+                        if pseudo_calls:
+                            summary_lines = []
+                            for tool_call in pseudo_calls:
+                                result = self._execute_tool(
+                                    tool_call["name"], tool_call.get("args", {}), builder
+                                )
+                                executed_tool_calls.append(tool_call["name"])
+                                summary_lines.append(
+                                    f"{tool_call['name']}({tool_call.get('args', {})}) -> {result}"
+                                )
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "TOOL RESULTS:\n" + "\n".join(summary_lines) + "\nContinue building using tools."
+                                    ),
+                                }
+                            )
+                            iteration += 1
+                            continue
+                    # Done with tool calls
                     break
                     
             except Exception as e:
@@ -476,9 +500,13 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
         if not builder._check_basic_connectivity():
             print(f"\n🔍 CONNECTIVITY DEBUG: Map {map_id} has connectivity issues")
             
-            # Log detailed connectivity analysis
-            total_accessible = sum(row.count('.') + row.count('+') for row in builder.grid)
-            reachable_count = self._count_reachable_tiles(builder.grid)
+            # Log detailed connectivity analysis (handle uninitialized grid)
+            if builder.grid:
+                total_accessible = sum(row.count('.') + row.count('+') for row in builder.grid)
+                reachable_count = self._count_reachable_tiles(builder.grid)
+            else:
+                total_accessible = 0
+                reachable_count = 0
             print(f"📊 Connectivity analysis: {reachable_count}/{total_accessible} tiles reachable")
             
             # Send connectivity warning with specific guidance
@@ -592,6 +620,13 @@ This is a critical requirement - maps without players are unplayable!"""
                 print(f"💥 LLM failed to add player: {e}")
                 print(f"⚠️ WARNING: This map will fail verification due to missing player!")
         
+        # Attach tool call stats
+        try:
+            builder.metadata["executed_tool_calls"] = executed_tool_calls
+            builder.metadata["tool_call_count"] = len(executed_tool_calls)
+        except Exception:
+            pass
+
         # Convert builder result to MapData
         try:
             return builder.to_map_data(map_id, prompt)
@@ -630,11 +665,50 @@ This is a critical requirement - maps without players are unplayable!"""
                     "temperature": self.temperature
                 },
                 "tools": self.tools,
-                "tool_choice": "auto"
+                "tool_choice": "required"
             }
             
             response = requests.post(url, json=payload, timeout=120)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as http_err:
+                # Fallback to OpenAI-compatible endpoint if /api/chat is missing
+                if response.status_code == 404:
+                    oai_url = f"{self.ollama_endpoint}/v1/chat/completions"
+                    # OpenAI-compatible payload
+                    oai_payload = {
+                        "model": self.model,
+                        "messages": [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in ollama_messages
+                        ],
+                        "tools": self.tools,
+                        "tool_choice": "auto",
+                        "temperature": self.temperature,
+                        "stream": False,
+                    }
+                    oai_resp = requests.post(oai_url, json=oai_payload, timeout=120)
+                    oai_resp.raise_for_status()
+                    oai = oai_resp.json()
+                    choice = (oai.get("choices") or [{}])[0]
+                    msg = choice.get("message", {})
+                    tool_calls = msg.get("tool_calls", [])
+                    content = msg.get("content", "")
+                    norm_calls = []
+                    for tc in tool_calls or []:
+                        fn = tc.get("function", {})
+                        name = fn.get("name")
+                        args = fn.get("arguments")
+                        if isinstance(args, str):
+                            import json as _json
+                            try:
+                                args = _json.loads(args)
+                            except Exception:
+                                args = {}
+                        if name:
+                            norm_calls.append({"name": name, "args": args or {}})
+                    return {"content": content, "tool_calls": norm_calls}
+                raise
             
             result = response.json()
             
@@ -643,16 +717,122 @@ This is a critical requirement - maps without players are unplayable!"""
                 message = result["message"]
                 content = message.get("content", "")
                 tool_calls = message.get("tool_calls", [])
-                
-                return {
-                    "content": content,
-                    "tool_calls": tool_calls
-                }
+                norm_calls: List[Dict[str, Any]] = []
+                # 1) Normalize native tool_calls if present
+                for tc in tool_calls or []:
+                    name = tc.get("name") or (tc.get("function") or {}).get("name")
+                    args = tc.get("args") or (tc.get("function") or {}).get("arguments")
+                    if isinstance(args, str):
+                        import json as _json
+                        try:
+                            args = _json.loads(args)
+                        except Exception:
+                            args = {}
+                    if name:
+                        norm_calls.append({"name": name, "args": args or {}})
+                # 2) Heuristic: some models return a single function call as JSON in content
+                if not norm_calls and isinstance(content, str):
+                    import json as _json
+                    text = content.strip()
+                    try:
+                        if text and (text[0] == '{' and text[-1] == '}'):
+                            obj = _json.loads(text)
+                            name = obj.get("name") or (obj.get("function") or {}).get("name")
+                            args = obj.get("args") or obj.get("arguments") or (obj.get("function") or {}).get("arguments")
+                            if isinstance(args, str):
+                                try:
+                                    args = _json.loads(args)
+                                except Exception:
+                                    args = {}
+                            if name:
+                                norm_calls.append({"name": name, "args": args or {}})
+                        elif text and text[0] == '[' and text[-1] == ']':
+                            arr = _json.loads(text)
+                            for item in arr:
+                                name = item.get("name") or (item.get("function") or {}).get("name")
+                                args = item.get("args") or item.get("arguments") or (item.get("function") or {}).get("arguments")
+                                if isinstance(args, str):
+                                    try:
+                                        args = _json.loads(args)
+                                    except Exception:
+                                        args = {}
+                                if name:
+                                    norm_calls.append({"name": name, "args": args or {}})
+                    except Exception:
+                        pass
+                return {"content": content, "tool_calls": norm_calls}
             else:
                 return {"content": result.get("response", ""), "tool_calls": []}
                 
         except Exception as e:
-            raise Exception(f"Ollama API error: {str(e)}")
+            # Last resort: pseudo-tool mode via /api/generate
+            try:
+                return self._call_ollama_pseudo_tools(messages)
+            except Exception:
+                raise Exception(f"Ollama API error: {str(e)}")
+
+    def _call_ollama_pseudo_tools(self, messages: List[Dict]) -> Dict[str, Any]:
+        """Simulate tool use over /api/generate by asking for JSON tool calls.
+
+        Returns a dict with keys: content, tool_calls (list of {name,args}).
+        """
+        import json as _json
+        url = f"{self.ollama_endpoint}/api/generate"
+
+        # Flatten chat history
+        convo = []
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content")
+            if isinstance(content, list):
+                content = _json.dumps(content)
+            convo.append(f"[{role}] {content}")
+        base = "\n".join(convo)
+
+        tool_schema = [
+            {"name": t["function"]["name"], "parameters": t["function"].get("parameters", {})}
+            for t in self.tools
+        ]
+
+        instruction = (
+            "Emit ONLY a JSON array of tool calls to execute next. "
+            "Each item must be an object with 'name' (function name) and 'args' (object). "
+            "Use these tools: " + _json.dumps(tool_schema) + ". No prose. JSON array only."
+        )
+
+        payload = {
+            "model": self.model,
+            "prompt": base + "\n\n" + instruction,
+            "stream": False,
+            "options": {"temperature": self.temperature},
+        }
+
+        r = requests.post(url, json=payload, timeout=120)
+        r.raise_for_status()
+        data = r.json()
+        text = (data.get("response") or "").strip()
+
+        # Extract first JSON array
+        tool_calls: List[Dict[str, Any]] = []
+        try:
+            start = text.find("[")
+            end = text.rfind("]")
+            if start != -1 and end != -1 and end > start:
+                arr = _json.loads(text[start:end+1])
+                for item in arr:
+                    name = item.get("name")
+                    args = item.get("args", {})
+                    if isinstance(args, str):
+                        try:
+                            args = _json.loads(args)
+                        except Exception:
+                            args = {}
+                    if name:
+                        tool_calls.append({"name": name, "args": args})
+        except Exception:
+            pass
+
+        return {"content": text, "tool_calls": tool_calls}
     
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any], builder: OllamaGridBuilder) -> str:
         """Execute a tool call on the grid builder."""
@@ -677,3 +857,32 @@ This is a critical requirement - maps without players are unplayable!"""
         except Exception as e:
             self.logger.error(f"Tool execution error: {e}")
             return f"Error executing {tool_name}: {str(e)}"
+
+    def _count_reachable_tiles(self, grid: List[List[str]]) -> int:
+        if not grid:
+            return 0
+        tiles_str = '\n'.join(''.join(row) for row in grid)
+        from ..shared.connectivity import count_reachable_tiles
+        return count_reachable_tiles(tiles_str, len(grid[0]), len(grid))
+
+    def _find_isolated_regions(self, grid: List[List[str]]) -> List[Dict[str, Any]]:
+        if not grid:
+            return []
+        tiles_str = '\n'.join(''.join(row) for row in grid)
+        from ..shared.connectivity import find_isolated_regions
+        return find_isolated_regions(tiles_str, len(grid[0]), len(grid))
+
+    def _generate_connectivity_warning(self, builder: OllamaGridBuilder) -> str:
+        if not builder.grid:
+            return "Grid not created yet. Use create_grid(20,15) first."
+        regions = self._find_isolated_regions(builder.grid)
+        if not regions:
+            return "No specific isolated regions found."
+        warning = "Found these isolated areas:\n"
+        for i, region in enumerate(regions[:3]):
+            warning += f"- Region {i+1}: {region['size']} floor tiles around ({region['center_x']}, {region['center_y']})\n"
+        warning += "\nSUGGESTIONS TO FIX:\n"
+        warning += "1. Use place_door(x,y) to create doorways between rooms\n"
+        warning += "2. Use place_corridor(x1,y1,x2,y2) to connect separated areas\n"
+        warning += "3. Ensure every room has at least one connection to other areas\n"
+        return warning

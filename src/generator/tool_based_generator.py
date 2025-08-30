@@ -7,7 +7,6 @@ import time
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
-import anthropic
 from pydantic import BaseModel
 
 from ..shared.utils import load_config, load_secrets
@@ -269,8 +268,21 @@ class ToolBasedMapGenerator:
     
     def __init__(self):
         self.config = load_config("generator.json")
-        self.secrets = load_secrets()
+        # Load secrets (may be absent in Ollama-only setups)
+        try:
+            self.secrets = load_secrets()
+        except Exception:
+            self.secrets = {}
         api_key = self.secrets.get("anthropic_api_key")
+        try:
+            # Lazy import anthropic so repo works without it when unused
+            import anthropic  # type: ignore
+        except Exception as e:
+            raise RuntimeError(
+                "Anthropic client not available. Install 'anthropic' and provide config/secrets.json with 'anthropic_api_key'."
+            ) from e
+        if not api_key:
+            raise RuntimeError("Missing Anthropic API key in config/secrets.json (anthropic_api_key)")
         self.client = anthropic.Anthropic(api_key=api_key)
         self.logger = logging.getLogger(__name__)
         

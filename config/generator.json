@@ -7,8 +7,8 @@
   },
   "ollama": {
     "endpoint": "http://localhost:11434",
-    "model": "deepseek-coder:33b-instruct",
-    "temperature": 0.3
+    "model": "llama3.1:8b",
+    "temperature": 0.2
   },
   "anthropic": {
     "model": "claude-3-5-sonnet-20241022",

@@ -14,8 +14,12 @@ def load_config(config_file: str) -> Dict[str, Any]:
 def load_secrets() -> Dict[str, str]:
     """Load secrets from config/secrets.json."""
     secrets_path = Path("config") / "secrets.json"
-    with open(secrets_path, "r") as f:
-        return json.load(f)
+    try:
+        with open(secrets_path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Return empty dict when secrets are not present; callers should handle missing keys
+        return {}
 
 
 def validate_map_dimensions(tiles: str, width: int, height: int) -> tuple[bool, list[str]]:

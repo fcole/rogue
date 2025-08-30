@@ -43,13 +43,26 @@ def run_command(cmd, description):
 def main():
     """Run the complete test suite workflow."""
     parser = argparse.ArgumentParser(description="Roguelike Testing System")
-    parser.add_argument("--generate", action="store_true", 
-                       help="Generate maps from test suite")
-    parser.add_argument("--verify", action="store_true",
-                       help="Verify generated maps")
-    parser.add_argument("--report", action="store_true",
-                       help="Generate HTML report")
-    
+    parser.add_argument("--generate", action="store_true", help="Generate maps from test suite")
+    parser.add_argument("--verify", action="store_true", help="Verify generated maps")
+    parser.add_argument("--report", action="store_true", help="Generate HTML report")
+    # Generator selection
+    parser.add_argument(
+        "--generator",
+        choices=["default", "ollama", "claude", "smart"],
+        default="default",
+        help="Choose generator: default (config), ollama (Ollama tool-based), claude (Anthropic tool-based), smart (smart positioning)",
+    )
+    parser.add_argument(
+        "--ollama-endpoint",
+        type=str,
+        help="Optional Ollama endpoint override (e.g., http://host.docker.internal:11434)",
+    )
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Print visual representation of maps during generation",
+    )
     args = parser.parse_args()
     
     # If no specific steps are requested, run the complete suite
@@ -69,12 +82,27 @@ def main():
     
     # Step 1: Generate maps from test suite
     if args.generate:
-        if run_command("generate --example --visualize", "Generating maps from test suite") != 0:
+        gen_flags = ["generate", "--example"]
+        if args.visualize:
+            gen_flags.append("--visualize")
+        if args.generator == "ollama":
+            gen_flags.append("--use-ollama-tools")
+        elif args.generator == "claude":
+            gen_flags.append("--use-tools")
+        elif args.generator == "smart":
+            gen_flags.append("--use-smart-positioning")
+        if args.ollama_endpoint:
+            gen_flags += ["--ollama-endpoint", args.ollama_endpoint]
+
+        if run_command(" ".join(gen_flags), "Generating maps from test suite") != 0:
             sys.exit(1)
     
     # Step 2: Verify all generated maps
     if args.verify:
-        if run_command("verify --example", "Verifying generated maps") != 0:
+        ver_flags = ["verify", "--example"]
+        if args.ollama_endpoint:
+            ver_flags += ["--ollama-endpoint", args.ollama_endpoint]
+        if run_command(" ".join(ver_flags), "Verifying generated maps") != 0:
             sys.exit(1)
     
     # Step 3: Generate HTML report
