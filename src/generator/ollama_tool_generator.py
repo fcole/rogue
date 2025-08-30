@@ -103,6 +103,22 @@ class OllamaGridBuilder:
             self.metadata.setdefault("doors", []).append(door_meta)
             return f"Placed door at ({x},{y})"
 
+        # Treat pond/water/lake as water tiles centered at (x,y)
+        if et_lower in {"pond", "water", "lake"}:
+            size = 3
+            if properties and isinstance(properties, dict):
+                size = int(properties.get("size", properties.get("radius", 3)) or 3)
+                size = max(1, min(size, 6))  # clamp
+            # Create a filled blob of '~' tiles within bounds
+            half = size // 2
+            for dy in range(-half, half + 1):
+                for dx in range(-half, half + 1):
+                    ny, nx = y + dy, x + dx
+                    if self._in_bounds(nx, ny) and 0 < ny < self.target_height-1 and 0 < nx < self.target_width-1:
+                        self.grid[ny][nx] = '~'
+            self.metadata.setdefault("water_areas", []).append({"cx": x, "cy": y, "size": size, "source": et_lower})
+            return f"Placed water area around ({x},{y}) size {size}"
+
         # Normalize/validate entity type against supported set
         norm = self._normalize_entity_type(entity_type)
         if not norm:
@@ -146,6 +162,28 @@ class OllamaGridBuilder:
                     door_meta["locked"] = True
                 self.metadata.setdefault("doors", []).append(door_meta)
                 results.append(f"Placed door at ({x},{y})")
+                continue
+            if rt_lower in {"pond", "water", "lake"}:
+                x = entity_data["x"]
+                y = entity_data["y"]
+                if not self._in_bounds(x, y):
+                    results.append(f"Error: Invalid coordinates ({x},{y}) for water")
+                    continue
+                size = 3
+                props = entity_data.get("properties", {}) or {}
+                try:
+                    size = int(props.get("size", props.get("radius", 3)) or 3)
+                except Exception:
+                    size = 3
+                size = max(1, min(size, 6))
+                half = size // 2
+                for dy in range(-half, half + 1):
+                    for dx in range(-half, half + 1):
+                        ny, nx = y + dy, x + dx
+                        if self._in_bounds(nx, ny) and 0 < ny < self.target_height-1 and 0 < nx < self.target_width-1:
+                            self.grid[ny][nx] = '~'
+                self.metadata.setdefault("water_areas", []).append({"cx": x, "cy": y, "size": size, "source": rt_lower})
+                results.append(f"Placed water area around ({x},{y}) size {size}")
                 continue
             if not entity_type:
                 self.metadata.setdefault("unknown_entities", []).append(raw_type)
@@ -225,6 +263,78 @@ class OllamaGridBuilder:
         door_count = sum(row.count('+') for row in self.grid)
         
         return f"Grid: {width}x{height}, Walls: {wall_count}, Floors: {floor_count}, Doors: {door_count}"
+
+    def _set_water(self, x: int, y: int):
+        if 0 < x < self.target_width - 1 and 0 < y < self.target_height - 1:
+            self.grid[y][x] = '~'
+
+    def place_water_area(self, cx: int, cy: int, shape: str = "circle", radius: int = 3, width: int = 6, height: int = 4) -> str:
+        if not self.grid:
+            return "Error: Must create grid first"
+        shape = (shape or "circle").lower()
+        if shape == "circle" or shape == "blob":
+            r = max(1, radius)
+            for yy in range(cy - r, cy + r + 1):
+                for xx in range(cx - r, cx + r + 1):
+                    if 0 <= xx < self.target_width and 0 <= yy < self.target_height:
+                        if (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) <= r * r:
+                            self._set_water(xx, yy)
+        elif shape == "rectangle":
+            w, h = max(1, width), max(1, height)
+            x0, y0 = cx - w // 2, cy - h // 2
+            for yy in range(y0, y0 + h):
+                for xx in range(x0, x0 + w):
+                    if 0 <= xx < self.target_width and 0 <= yy < self.target_height:
+                        self._set_water(xx, yy)
+        elif shape == "ellipse":
+            a, b = max(1, width // 2), max(1, height // 2)
+            for yy in range(cy - b, cy + b + 1):
+                for xx in range(cx - a, cx + a + 1):
+                    if 0 <= xx < self.target_width and 0 <= yy < self.target_height:
+                        if ((xx - cx) * (xx - cx)) / (a * a + 1e-6) + ((yy - cy) * (yy - cy)) / (b * b + 1e-6) <= 1.0:
+                            self._set_water(xx, yy)
+        else:
+            return f"Error: Unknown water shape '{shape}'"
+        self.metadata.setdefault("water_areas", []).append({"cx": cx, "cy": cy, "shape": shape, "radius": radius, "width": width, "height": height})
+        return f"Placed water area at ({cx},{cy}) shape {shape}"
+
+    def place_river_path(self, points: List[Dict[str, int]], width: int = 2) -> str:
+        if not self.grid:
+            return "Error: Must create grid first"
+        if not points or len(points) < 2:
+            return "Error: River requires at least 2 points"
+        w = max(1, min(int(width), 7))
+        half = max(0, (w - 1) // 2)
+
+        def draw_line(x0, y0, x1, y1):
+            dx = abs(x1 - x0)
+            dy = -abs(y1 - y0)
+            sx = 1 if x0 < x1 else -1
+            sy = 1 if y0 < y1 else -1
+            err = dx + dy
+            x, y = x0, y0
+            while True:
+                for oy in range(-half, half + 1):
+                    for ox in range(-half, half + 1):
+                        nx, ny = x + ox, y + oy
+                        if 0 <= nx < self.target_width and 0 <= ny < self.target_height:
+                            self._set_water(nx, ny)
+                if x == x1 and y == y1:
+                    break
+                e2 = 2 * err
+                if e2 >= dy:
+                    err += dy
+                    x += sx
+                if e2 <= dx:
+                    err += dx
+                    y += sy
+
+        for i in range(len(points) - 1):
+            x0, y0 = int(points[i]["x"]), int(points[i]["y"])
+            x1, y1 = int(points[i + 1]["x"]), int(points[i + 1]["y"])
+            draw_line(x0, y0, x1, y1)
+        self.metadata.setdefault("rivers", []).append({"points": points, "width": w})
+        return f"Placed river of width {w} along {len(points)} points"
     
     def _validate_bounds(self, x: int, y: int, width: int, height: int) -> bool:
         """Check if a rectangle fits within grid bounds."""
@@ -313,6 +423,38 @@ class OllamaToolBasedGenerator:
                         "height": {"type": "integer", "const": 15}
                     },
                     "required": ["width", "height"]
+                }
+            },
+            {
+                "name": "place_water_area",
+                "description": "Create a water area ('~' tiles) with a given shape centered at (cx,cy)",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cx": {"type": "integer", "minimum": 0, "maximum": 19},
+                        "cy": {"type": "integer", "minimum": 0, "maximum": 14},
+                        "shape": {"type": "string", "enum": ["circle", "rectangle", "ellipse", "blob"], "default": "circle"},
+                        "radius": {"type": "integer", "minimum": 1, "maximum": 9, "default": 3},
+                        "width": {"type": "integer", "minimum": 1, "maximum": 19, "default": 6},
+                        "height": {"type": "integer", "minimum": 1, "maximum": 14, "default": 4}
+                    },
+                    "required": ["cx", "cy"]
+                }
+            },
+            {
+                "name": "place_river_path",
+                "description": "Create a river by drawing water along a path of points with a given width",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "points": {
+                            "type": "array",
+                            "minItems": 2,
+                            "items": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"]}
+                        },
+                        "width": {"type": "integer", "minimum": 1, "maximum": 7, "default": 2}
+                    },
+                    "required": ["points"]
                 }
             },
             {
@@ -514,7 +656,8 @@ class OllamaToolBasedGenerator:
                             tool_call.get("args", {}),
                             builder,
                         )
-                        executed_tool_calls.append(tool_call["name"])
+                        if not str(result).startswith("Error"):
+                            executed_tool_calls.append(tool_call["name"])
                         summary_lines.append(
                             f"{tool_call['name']}({tool_call.get('args', {})}) -> {result}"
                         )
@@ -548,7 +691,8 @@ class OllamaToolBasedGenerator:
                                 result = self._execute_tool(
                                     tool_call["name"], tool_call.get("args", {}), builder
                                 )
-                                executed_tool_calls.append(tool_call["name"])
+                                if not str(result).startswith("Error"):
+                                    executed_tool_calls.append(tool_call["name"])
                                 summary_lines.append(
                                     f"{tool_call['name']}({tool_call.get('args', {})}) -> {result}"
                                 )
@@ -917,6 +1061,29 @@ This is a critical requirement - maps without players are unplayable!"""
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any], builder: OllamaGridBuilder) -> str:
         """Execute a tool call on the grid builder."""
         try:
+            # Light argument normalization for robustness
+            if tool_name == "place_water_area":
+                ti = dict(tool_input or {})
+                if "cx" not in ti and "x" in ti:
+                    ti["cx"] = ti.pop("x")
+                if "cy" not in ti and "y" in ti:
+                    ti["cy"] = ti.pop("y")
+                shape = (ti.get("shape") or "circle").lower()
+                if shape not in {"circle", "rectangle", "ellipse", "blob"}:
+                    ti["shape"] = "circle"
+                tool_input = ti
+            elif tool_name == "place_river_path":
+                ti = dict(tool_input or {})
+                pts = ti.get("points") or []
+                norm_pts = []
+                for p in pts:
+                    if "x" in p and "y" in p:
+                        norm_pts.append({"x": int(p["x"]), "y": int(p["y"])})
+                    elif "cx" in p and "cy" in p:
+                        norm_pts.append({"x": int(p["cx"]), "y": int(p["cy"])})
+                if norm_pts:
+                    ti["points"] = norm_pts
+                tool_input = ti
             if tool_name == "create_grid":
                 return builder.create_grid(**tool_input)
             elif tool_name == "place_room":
@@ -931,6 +1098,10 @@ This is a critical requirement - maps without players are unplayable!"""
                 return builder.place_multiple_entities(**tool_input)
             elif tool_name == "get_grid_status":
                 return builder.get_grid_status()
+            elif tool_name == "place_water_area":
+                return builder.place_water_area(**tool_input)
+            elif tool_name == "place_river_path":
+                return builder.place_river_path(**tool_input)
             else:
                 return f"Error: Unknown tool '{tool_name}'"
                 

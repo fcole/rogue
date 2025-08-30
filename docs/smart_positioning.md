@@ -178,3 +178,4 @@ This should significantly improve:
 
 The system maintains backward compatibility while providing a much more natural interface for LLMs to work with spatial concepts.
 
+

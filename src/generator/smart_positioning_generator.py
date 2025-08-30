@@ -384,3 +384,4 @@ class SmartPositioningGenerator:
         builder.place_corridor("center of room1", "center of main_room")
         return builder.to_map_data(map_id, prompt)  # type: ignore[attr-defined]
 
+

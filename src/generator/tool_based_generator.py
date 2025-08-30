@@ -146,6 +146,23 @@ class GridBuilder:
             self.grid[y][x] = '+'
             return f"Placed door at ({x},{y})"
 
+        # Treat pond/water/lake as water tiles centered at (x,y)
+        if et_lower in {"pond", "water", "lake"}:
+            size = 3
+            if properties and isinstance(properties, dict):
+                try:
+                    size = int(properties.get("size", properties.get("radius", 3)) or 3)
+                except Exception:
+                    size = 3
+            size = max(1, min(size, 6))
+            half = size // 2
+            for dy in range(-half, half + 1):
+                for dx in range(-half, half + 1):
+                    ny, nx = y + dy, x + dx
+                    if self._in_bounds(nx, ny) and 0 < ny < self.target_height-1 and 0 < nx < self.target_width-1:
+                        self.grid[ny][nx] = '~'
+            return f"Placed water area around ({x},{y}) size {size}"
+
         # Normalize extended entity types (tomb, spirit, human)
         entity_type = self._normalize_entity_type(entity_type)
         if not entity_type:
@@ -300,6 +317,76 @@ class GridBuilder:
         from ..shared.connectivity import check_map_connectivity
         return check_map_connectivity(tiles_str, len(self.grid[0]), len(self.grid))
 
+    def _set_water(self, x: int, y: int):
+        if 0 < x < self.target_width - 1 and 0 < y < self.target_height - 1:
+            self.grid[y][x] = '~'
+
+    def place_water_area(self, cx: int, cy: int, shape: str = "circle", radius: int = 3, width: int = 6, height: int = 4) -> str:
+        if not self.grid:
+            return "Error: Must create grid first"
+        shape = (shape or "circle").lower()
+        if shape == "circle" or shape == "blob":
+            r = max(1, radius)
+            for yy in range(cy - r, cy + r + 1):
+                for xx in range(cx - r, cx + r + 1):
+                    if 0 <= xx < self.target_width and 0 <= yy < self.target_height:
+                        if (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) <= r * r:
+                            self._set_water(xx, yy)
+        elif shape == "rectangle":
+            w, h = max(1, width), max(1, height)
+            x0, y0 = cx - w // 2, cy - h // 2
+            for yy in range(y0, y0 + h):
+                for xx in range(x0, x0 + w):
+                    if 0 <= xx < self.target_width and 0 <= yy < self.target_height:
+                        self._set_water(xx, yy)
+        elif shape == "ellipse":
+            a, b = max(1, width // 2), max(1, height // 2)
+            for yy in range(cy - b, cy + b + 1):
+                for xx in range(cx - a, cx + a + 1):
+                    if 0 <= xx < self.target_width and 0 <= yy < self.target_height:
+                        if ((xx - cx) * (xx - cx)) / (a * a + 1e-6) + ((yy - cy) * (yy - cy)) / (b * b + 1e-6) <= 1.0:
+                            self._set_water(xx, yy)
+        else:
+            return f"Error: Unknown water shape '{shape}'"
+        return f"Placed water area at ({cx},{cy}) shape {shape}"
+
+    def place_river_path(self, points: List[Dict[str, int]], width: int = 2) -> str:
+        if not self.grid:
+            return "Error: Must create grid first"
+        if not points or len(points) < 2:
+            return "Error: River requires at least 2 points"
+        w = max(1, min(int(width), 7))
+        half = max(0, (w - 1) // 2)
+
+        def draw_line(x0, y0, x1, y1):
+            dx = abs(x1 - x0)
+            dy = -abs(y1 - y0)
+            sx = 1 if x0 < x1 else -1
+            sy = 1 if y0 < y1 else -1
+            err = dx + dy
+            x, y = x0, y0
+            while True:
+                for oy in range(-half, half + 1):
+                    for ox in range(-half, half + 1):
+                        nx, ny = x + ox, y + oy
+                        if 0 <= nx < self.target_width and 0 <= ny < self.target_height:
+                            self._set_water(nx, ny)
+                if x == x1 and y == y1:
+                    break
+                e2 = 2 * err
+                if e2 >= dy:
+                    err += dy
+                    x += sx
+                if e2 <= dx:
+                    err += dx
+                    y += sy
+
+        for i in range(len(points) - 1):
+            x0, y0 = int(points[i]["x"]), int(points[i]["y"])
+            x1, y1 = int(points[i + 1]["x"]), int(points[i + 1]["y"])
+            draw_line(x0, y0, x1, y1)
+        return f"Placed river of width {w} along {len(points)} points"
+
 
 class ToolBasedMapGenerator:
     """Map generator using Claude API tool calling for guaranteed constraints."""
@@ -419,6 +506,38 @@ class ToolBasedMapGenerator:
                         }
                     },
                     "required": ["entities"]
+                }
+            },
+            {
+                "name": "place_water_area",
+                "description": "Create a water area ('~' tiles) with a given shape centered at (cx,cy)",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "cx": {"type": "integer", "minimum": 0, "maximum": 19},
+                        "cy": {"type": "integer", "minimum": 0, "maximum": 14},
+                        "shape": {"type": "string", "enum": ["circle", "rectangle", "ellipse", "blob"], "default": "circle"},
+                        "radius": {"type": "integer", "minimum": 1, "maximum": 9, "default": 3},
+                        "width": {"type": "integer", "minimum": 1, "maximum": 19, "default": 6},
+                        "height": {"type": "integer", "minimum": 1, "maximum": 14, "default": 4}
+                    },
+                    "required": ["cx", "cy"]
+                }
+            },
+            {
+                "name": "place_river_path",
+                "description": "Create a river by drawing water along a path of points with a given width",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "points": {
+                            "type": "array",
+                            "minItems": 2,
+                            "items": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"]}
+                        },
+                        "width": {"type": "integer", "minimum": 1, "maximum": 7, "default": 2}
+                    },
+                    "required": ["points"]
                 }
             },
             {
