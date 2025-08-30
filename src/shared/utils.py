@@ -76,6 +76,12 @@ def visualize_map(map_data: MapData) -> str:
                     display_line += "S"
                 elif EntityType.CHEST in entities:
                     display_line += "C"
+                elif EntityType.TOMB in entities:
+                    display_line += "T"
+                elif EntityType.SPIRIT in entities:
+                    display_line += "X"
+                elif EntityType.HUMAN in entities:
+                    display_line += "H"
                 else:
                     display_line += char
             else:

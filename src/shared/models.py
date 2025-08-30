@@ -17,6 +17,9 @@ class EntityType(str, Enum):
     GOBLIN = "goblin"
     SHOP = "shop"
     CHEST = "chest"
+    TOMB = "tomb"
+    SPIRIT = "spirit"
+    HUMAN = "human"
 
 
 class EntityData(BaseModel):

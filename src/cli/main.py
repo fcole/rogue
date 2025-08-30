@@ -100,7 +100,16 @@ def generate(prompts, prompt, output, example, visualize, use_ollama_tools, use_
                 generator_type = "Ollama tool-based"
                 generator = OllamaToolBasedGenerator()
     
-    console.print(f"[green]Generating maps for {len(prompts_list)} prompts using {generator_type} generator...[/green]")
+    # Include model details when available (e.g., Ollama/Anthropic generators)
+    model_info = ""
+    try:
+        if hasattr(generator, "model") and getattr(generator, "model"):
+            model_info = f" (model: {getattr(generator, 'model')})"
+    except Exception:
+        pass
+    console.print(
+        f"[green]Generating maps for {len(prompts_list)} prompts using {generator_type} generator{model_info}...[/green]"
+    )
     
     with Progress(
         SpinnerColumn(),
@@ -274,6 +283,9 @@ def verify(maps, prompts, results, output, example, ollama_endpoint):
         
         if not result.quantitative_checks.get("connectivity", {}).get("passed", True):
             issues.append("connectivity")
+        # Flag unknown entities if any
+        if result.quantitative_checks.get("unknown_entities", {}).get("count", 0) > 0:
+            issues.append("unknown_entities")
         
         table.add_row(
             result.test_id,

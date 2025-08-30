@@ -91,40 +91,78 @@ class OllamaGridBuilder:
         """Place an entity at the specified coordinates."""
         if not self.grid or not self._in_bounds(x, y):
             return f"Error: Invalid coordinates ({x},{y})"
-        
+
+        # Treat door-like entity requests as a request to place a door tile
+        et_lower = str(entity_type).strip().lower() if entity_type else ""
+        if et_lower in {"door", "locked_door", "doorway"}:
+            self.grid[y][x] = '+'
+            # Record door metadata (e.g., locked) without polluting entities
+            door_meta = {"x": x, "y": y}
+            if et_lower == "locked_door" or (properties or {}).get("locked"):
+                door_meta["locked"] = True
+            self.metadata.setdefault("doors", []).append(door_meta)
+            return f"Placed door at ({x},{y})"
+
+        # Normalize/validate entity type against supported set
+        norm = self._normalize_entity_type(entity_type)
+        if not norm:
+            # Track unknown entity types to help debugging
+            self.metadata.setdefault("unknown_entities", []).append(entity_type)
+            return f"Warning: Unknown entity type '{entity_type}' ignored"
+
         # Check if position is on floor
         if self.grid[y][x] != '.':
-            return f"Warning: Entity {entity_type} placed at ({x},{y}) not on floor tile"
-        
-        if entity_type not in self.entities:
-            self.entities[entity_type] = []
-        
-        self.entities[entity_type].append(EntityData(
+            return f"Warning: Entity {norm} placed at ({x},{y}) not on floor tile"
+
+        if norm not in self.entities:
+            self.entities[norm] = []
+
+        self.entities[norm].append(EntityData(
             x=x, y=y, properties=properties or {}
         ))
-        
-        return f"Placed {entity_type} at ({x},{y})"
+
+        return f"Placed {norm} at ({x},{y})"
     
     def place_multiple_entities(self, entities: List[Dict[str, Any]]) -> str:
         """Place multiple entities at once for efficiency."""
         if not self.grid:
             return "Error: Must create grid first"
-        
+
         results = []
         for entity_data in entities:
-            entity_type = entity_data["entity_type"]
+            raw_type = entity_data["entity_type"]
+            entity_type = self._normalize_entity_type(raw_type)
+            # Handle door-like entity requests inline
+            rt_lower = str(raw_type).strip().lower() if raw_type else ""
+            if rt_lower in {"door", "locked_door", "doorway"}:
+                x = entity_data["x"]
+                y = entity_data["y"]
+                if not self._in_bounds(x, y):
+                    results.append(f"Error: Invalid coordinates ({x},{y}) for door")
+                    continue
+                self.grid[y][x] = '+'
+                door_meta = {"x": x, "y": y}
+                if rt_lower == "locked_door" or entity_data.get("properties", {}).get("locked"):
+                    door_meta["locked"] = True
+                self.metadata.setdefault("doors", []).append(door_meta)
+                results.append(f"Placed door at ({x},{y})")
+                continue
+            if not entity_type:
+                self.metadata.setdefault("unknown_entities", []).append(raw_type)
+                results.append(f"Warning: Unknown entity type '{raw_type}' ignored")
+                continue
             x = entity_data["x"]
             y = entity_data["y"]
             properties = entity_data.get("properties", {})
-            
+
             if not self._in_bounds(x, y):
                 results.append(f"Error: Invalid coordinates ({x},{y}) for {entity_type}")
                 continue
-            
+
             # Check if position is on floor
             if self.grid[y][x] != '.':
                 results.append(f"Warning: {entity_type} at ({x},{y}) not on floor tile")
-            
+
             if entity_type not in self.entities:
                 self.entities[entity_type] = []
             
@@ -133,8 +171,46 @@ class OllamaGridBuilder:
             ))
             
             results.append(f"Placed {entity_type} at ({x},{y})")
-        
+
         return "; ".join(results)
+
+    def _normalize_entity_type(self, entity_type: str) -> Optional[str]:
+        """Map various synonyms to the supported entity types.
+
+        Supported: player, ogre, goblin, shop, chest
+        Common synonyms we map:
+          - shopkeeper/merchant/store -> shop
+          - boss -> ogre
+        Returns normalized lowercase name or None if unsupported.
+        """
+        if not entity_type:
+            return None
+        t = str(entity_type).strip().lower()
+        synonyms = {
+            "shopkeeper": "shop",
+            "merchant": "shop",
+            "store": "shop",
+            "seller": "shop",
+            "trader": "shop",
+            "boss": "ogre",
+            "ghost": "spirit",
+            "ghosts": "spirit",
+            "spirits": "spirit",
+            "tombs": "tomb",
+            "customer": "human",
+            "customers": "human",
+            "shopper": "human",
+            "shoppers": "human",
+            "patron": "human",
+            "patrons": "human",
+            "villager": "human",
+            "villagers": "human",
+        }
+        if t in {"player", "ogre", "goblin", "shop", "chest", "tomb", "spirit", "human"}:
+            return t
+        if t in synonyms:
+            return synonyms[t]
+        return None
     
     def get_grid_status(self) -> str:
         """Get current grid dimensions and tile counts."""
@@ -502,12 +578,12 @@ class OllamaToolBasedGenerator:
             
             # Log detailed connectivity analysis (handle uninitialized grid)
             if builder.grid:
-                total_accessible = sum(row.count('.') + row.count('+') for row in builder.grid)
-                reachable_count = self._count_reachable_tiles(builder.grid)
+                total_accessible_before = sum(row.count('.') + row.count('+') for row in builder.grid)
+                reachable_before = self._count_reachable_tiles(builder.grid)
             else:
-                total_accessible = 0
-                reachable_count = 0
-            print(f"📊 Connectivity analysis: {reachable_count}/{total_accessible} tiles reachable")
+                total_accessible_before = 0
+                reachable_before = 0
+            print(f"📊 Connectivity analysis: {reachable_before}/{total_accessible_before} tiles reachable")
             
             # Send connectivity warning with specific guidance
             connectivity_warning = self._generate_connectivity_warning(builder)
@@ -541,9 +617,13 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
                         )
                         print(f"✅ Tool execution result: {result}")
                 
-                # Check if connectivity was fixed
+                # Check if connectivity was fixed (recompute totals after tool actions)
                 new_reachable = self._count_reachable_tiles(builder.grid)
-                print(f"📊 After fix attempt: {new_reachable}/{total_accessible} tiles reachable")
+                total_accessible_after = (
+                    sum(row.count('.') + row.count('+') for row in builder.grid)
+                    if builder.grid else 0
+                )
+                print(f"📊 After fix attempt: {new_reachable}/{total_accessible_after} tiles reachable")
                 
                 if builder._check_basic_connectivity():
                     print(f"🎉 Map {map_id} connectivity fixed successfully by LLM")
@@ -553,7 +633,7 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
                     })
                 else:
                     print(f"❌ Map {map_id} still has connectivity issues after LLM fix attempt")
-                    print(f"📊 Connectivity check failed: {new_reachable}/{total_accessible} tiles reachable")
+                    print(f"📊 Connectivity check failed: {new_reachable}/{total_accessible_after} tiles reachable")
                 
             except Exception as e:
                 print(f"💥 LLM failed to fix connectivity: {e}")

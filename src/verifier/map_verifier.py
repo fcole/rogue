@@ -1,7 +1,7 @@
 import json
 import time
 from typing import List, Dict, Any
-from ..shared.models import MapData, VerificationResult, EntityType
+from ..shared.models import MapData, VerificationResult, EntityType, EntityData
 from ..shared.llm_client import LLMClient
 from ..shared.utils import load_config, visualize_map, count_tiles, validate_map_dimensions, validate_map_connectivity
 
@@ -62,9 +62,35 @@ class MapVerifier:
             map_data = test_case["map"]
             test_id = test_case.get("test_id", "unknown")
             
-            # Convert dict to MapData if needed
+            # Convert dict to MapData if needed, gracefully handling unknown entity keys
+            unknown_entities: list[str] = []
             if isinstance(map_data, dict):
-                map_data = MapData(**map_data)
+                try:
+                    map_data = MapData(**map_data)
+                except Exception:
+                    md = dict(map_data)
+                    entities_in = md.get("entities", {}) or {}
+                    entities_out: Dict[EntityType, List[EntityData]] = {}
+                    for key, items in entities_in.items():
+                        try:
+                            et = EntityType(key)
+                        except Exception:
+                            unknown_entities.append(str(key))
+                            continue
+                        lst: List[EntityData] = []
+                        for it in items or []:
+                            try:
+                                lst.append(EntityData(**it))
+                            except Exception:
+                                continue
+                        if lst:
+                            entities_out[et] = lst
+                    md["entities"] = entities_out
+                    meta = md.get("metadata", {}) or {}
+                    if unknown_entities:
+                        meta["unknown_entities"] = sorted(set(unknown_entities))
+                    md["metadata"] = meta
+                    map_data = MapData(**md)
             
             # First check for critical dimension errors - these are automatic failures
             dimension_valid, dimension_errors = self._check_dimensions(map_data)
@@ -73,6 +99,18 @@ class MapVerifier:
             quantitative_score, quantitative_details = self._quantitative_verification(
                 prompt, map_data
             )
+            # Surface unknown entities from metadata or coercion
+            try:
+                ue = list(map_data.metadata.get("unknown_entities", [])) if map_data.metadata else []
+                if unknown_entities:
+                    ue = sorted(set(ue + unknown_entities))
+                if ue:
+                    quantitative_details["unknown_entities"] = {
+                        "count": len(ue),
+                        "values": ue
+                    }
+            except Exception:
+                pass
             
             # Add dimension errors to quantitative details
             if dimension_errors:
@@ -233,7 +271,10 @@ class MapVerifier:
             "ogre": ["ogre", "ogres"],
             "goblin": ["goblin", "goblins"], 
             "shop": ["shop", "store", "merchant"],
-            "chest": ["chest", "treasure"]
+            "chest": ["chest", "treasure"],
+            "tomb": ["tomb", "tombs"],
+            "spirit": ["spirit", "spirits", "ghost", "ghosts"],
+            "human": ["customer", "customers", "shopper", "shoppers", "patron", "patrons", "villager", "villagers"],
         }
         
         def _count_entities(mt: MapData, et: EntityType) -> int:

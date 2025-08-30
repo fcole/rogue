@@ -238,7 +238,7 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                         <div class="map-visual">{visual}</div>
                         <div class="entity-legend">
                             <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br>
-                            <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest
+                            <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
                         </div>
                         {f'<div class="warnings {status_class}"><strong>Warnings:</strong><ul>{"".join(f"<li>{w}</li>" for w in warnings)}</ul></div>' if warnings else ''}
                     </div>
@@ -311,6 +311,18 @@ def _generate_verification_details(ver_result: Dict[str, Any]) -> str:
             status = "✓" if check.get("passed", True) else "✗"
             html += f'<li>{status} {entity_type}: expected {check.get("expected", "?")} got {check.get("actual", "?")}</li>'
         html += '</ul></div>'
+
+    # Unknown entities surfaced by verifier
+    if "unknown_entities" in quant_checks and quant_checks["unknown_entities"].get("count", 0) > 0:
+        ue = quant_checks["unknown_entities"]
+        values = ue.get("values", [])
+        html += (
+            '<div style="margin-top: 10px; padding: 8px; background: #fff3cd; border-left: 4px solid #ffc107;">'
+            '<strong>Unknown Entities Detected</strong>'
+            f'<div>Count: {ue.get("count", 0)}</div>'
+            f'<div>Values: {", ".join(values)}</div>'
+            '</div>'
+        )
     
     # LLM feedback
     llm_response = ver_result.get("llm_response", {})

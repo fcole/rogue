@@ -139,19 +139,57 @@ class GridBuilder:
         """Place an entity at the specified coordinates."""
         if not self.grid or not self._in_bounds(x, y):
             return f"Error: Invalid coordinates ({x},{y})"
-        
+
+        # Treat door-like entity requests as a request to place a door tile
+        et_lower = str(entity_type).strip().lower() if entity_type else ""
+        if et_lower in {"door", "locked_door", "doorway"}:
+            self.grid[y][x] = '+'
+            return f"Placed door at ({x},{y})"
+
+        # Normalize extended entity types (tomb, spirit, human)
+        entity_type = self._normalize_entity_type(entity_type)
+        if not entity_type:
+            return f"Warning: Unknown entity type '{et_lower}' ignored"
+
         # Check if position is on floor
         if self.grid[y][x] != '.':
             return f"Warning: Entity {entity_type} placed at ({x},{y}) not on floor tile"
-        
+
         if entity_type not in self.entities:
             self.entities[entity_type] = []
         
         self.entities[entity_type].append(EntityData(
             x=x, y=y, properties=properties or {}
         ))
-        
+
         return f"Placed {entity_type} at ({x},{y})"
+
+    def _normalize_entity_type(self, entity_type: str) -> Optional[str]:
+        if not entity_type:
+            return None
+        t = str(entity_type).strip().lower()
+        if t in {"player", "ogre", "goblin", "shop", "chest", "tomb", "spirit", "human"}:
+            return t
+        synonyms = {
+            "ghost": "spirit",
+            "ghosts": "spirit",
+            "spirits": "spirit",
+            "tombs": "tomb",
+            "customer": "human",
+            "customers": "human",
+            "shopper": "human",
+            "shoppers": "human",
+            "patron": "human",
+            "patrons": "human",
+            "villager": "human",
+            "villagers": "human",
+            "shopkeeper": "shop",
+            "merchant": "shop",
+            "store": "shop",
+            "seller": "shop",
+            "trader": "shop",
+        }
+        return synonyms.get(t)
     
     def place_multiple_entities(self, entities: List[Dict[str, Any]]) -> str:
         """Place multiple entities at once for efficiency."""
@@ -552,10 +590,10 @@ Build a map that matches the prompt creatively while ensuring proper connectivit
         if not builder._check_basic_connectivity():
             print(f"\n🔍 CONNECTIVITY DEBUG: Map {map_id} has connectivity issues")
             
-            # Log detailed connectivity analysis
-            total_accessible = sum(row.count('.') + row.count('+') for row in builder.grid)
-            reachable_count = self._count_reachable_tiles(builder.grid)
-            print(f"📊 Connectivity analysis: {reachable_count}/{total_accessible} tiles reachable")
+            # Log detailed connectivity analysis (initial snapshot)
+            total_accessible_before = sum(row.count('.') + row.count('+') for row in builder.grid)
+            reachable_before = self._count_reachable_tiles(builder.grid)
+            print(f"📊 Connectivity analysis: {reachable_before}/{total_accessible_before} tiles reachable")
             
             # Send connectivity warning with specific guidance
             connectivity_warning = self._generate_connectivity_warning(builder)
@@ -599,9 +637,10 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
                 else:
                     print(f"❌ LLM did not make tool calls. Response: {response.content[0].text if response.content else 'No content'}")
                 
-                # Check if connectivity was fixed
+                # Check if connectivity was fixed (recompute totals after tool actions)
                 new_reachable = self._count_reachable_tiles(builder.grid)
-                print(f"📊 After fix attempt: {new_reachable}/{total_accessible} tiles reachable")
+                total_accessible_after = sum(row.count('.') + row.count('+') for row in builder.grid)
+                print(f"📊 After fix attempt: {new_reachable}/{total_accessible_after} tiles reachable")
                 
                 if builder._check_basic_connectivity():
                     print(f"🎉 Map {map_id} connectivity fixed successfully by LLM")
@@ -611,7 +650,7 @@ Use place_corridor() or place_door() to connect separated regions. Fix this conn
                     })
                 else:
                     print(f"❌ Map {map_id} still has connectivity issues after LLM fix attempt")
-                    print(f"📊 Connectivity check failed: {new_reachable}/{total_accessible} tiles reachable")
+                    print(f"📊 Connectivity check failed: {new_reachable}/{total_accessible_after} tiles reachable")
                 
             except Exception as e:
                 print(f"💥 LLM failed to fix connectivity: {e}")
