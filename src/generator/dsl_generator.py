@@ -31,6 +31,7 @@ import time
 from typing import Dict, Any, List, Optional, Tuple, Union, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
+from pydantic import ConfigDict
 from enum import Enum
 
 from ..shared.utils import load_config, load_secrets
@@ -78,6 +79,37 @@ class RoomCommand(BaseCommand):
     y: int = Field(ge=0, le=14, description="Top edge Y coordinate (0-14)")
     width: int = Field(ge=1, description="Room width")
     height: int = Field(ge=1, description="Room height")
+
+
+class DoorOnCommand(BaseCommand):
+    """Place a door on a labeled room wall."""
+    type: Literal["door_on"] = "door_on"
+    room: str = Field(description="Target room name")
+    wall: Literal["north", "south", "east", "west"] = Field(description="Wall side")
+    at: Optional[Literal["center", "start", "end"]] = Field(default="center", description="Position selector on wall")
+    offset: Optional[int] = Field(default=None, ge=0, description="Offset from wall start (excludes corners)")
+
+
+class ConnectByWallsCommand(BaseCommand):
+    """Connect two rooms by specifying wall sides; carves an L/I corridor and places doors."""
+    type: Literal["connect_by_walls"] = "connect_by_walls"
+    a: str = Field(description="First room name")
+    a_wall: Literal["north", "south", "east", "west"]
+    b: str = Field(description="Second room name")
+    b_wall: Literal["north", "south", "east", "west"]
+    style: Literal["L", "I"] = Field("L", description="Corridor style")
+
+
+class SpawnInCommand(BaseCommand):
+    """Spawn an entity within a labeled room region."""
+    type: Literal["spawn"] = "spawn"
+    entity: EntityType = Field(description="Entity type to spawn")
+    in_room: Optional[str] = Field(default=None, alias="in", description="Room name to spawn in")
+    at: Optional[Literal["center"]] = Field(default="center", description="Anchor within room")
+    dx: int = Field(0, description="X offset from anchor")
+    dy: int = Field(0, description="Y offset from anchor")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Optional entity properties")
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CorridorCommand(BaseCommand):
@@ -141,9 +173,9 @@ class CheckpointCommand(BaseCommand):
 DSLCommand = Union[
     GridCommand,
     RoomCommand,
-    CorridorCommand,
-    DoorCommand,
-    SpawnCommand,
+    DoorOnCommand,
+    ConnectByWallsCommand,
+    SpawnInCommand,
     WaterAreaCommand,
     RiverCommand,
     CheckpointCommand
@@ -162,6 +194,7 @@ class DSLMapBuilder:
         self.target_width = width
         self.target_height = height
         self.grid: Optional[List[List[str]]] = None
+        self.labels: Optional[List[List[set]]] = None
         self.entities: Dict[str, List[EntityData]] = {}
         self.checkpoints: Dict[str, Dict[str, Any]] = {}
         self.last_checkpoint = None
@@ -172,12 +205,12 @@ class DSLMapBuilder:
             return self._cmd_grid(command.width, command.height)
         elif isinstance(command, RoomCommand):
             return self._cmd_room(command.name, command.x, command.y, command.width, command.height)
-        elif isinstance(command, CorridorCommand):
-            return self._cmd_corridor(command.x1, command.y1, command.x2, command.y2)
-        elif isinstance(command, DoorCommand):
-            return self._cmd_door(command.x, command.y, **command.properties)
-        elif isinstance(command, SpawnCommand):
-            return self._cmd_spawn(command.entity, command.x, command.y, **command.properties)
+        elif isinstance(command, DoorOnCommand):
+            return self._cmd_door_on(command.room, command.wall, command.at, command.offset)
+        elif isinstance(command, ConnectByWallsCommand):
+            return self._cmd_connect_by_walls(command.a, command.a_wall, command.b, command.b_wall, command.style)
+        elif isinstance(command, SpawnInCommand):
+            return self._cmd_spawn_in(command.entity, command.in_room, command.at, command.dx, command.dy, **command.properties)
         elif isinstance(command, WaterAreaCommand):
             return self._cmd_water_area(command.x, command.y, command.shape, command.radius,
                                        command.width, command.height, **command.properties)
@@ -196,6 +229,7 @@ class DSLMapBuilder:
             raise DSLExecutionError(f"Grid must be {self.target_width}x{self.target_height}, got {width}x{height}")
         
         self.grid = [['#' for _ in range(width)] for _ in range(height)]
+        self.labels = [[set() for _ in range(width)] for _ in range(height)]
         
         # Create interior space
         for i in range(1, height - 1):
@@ -212,63 +246,129 @@ class DSLMapBuilder:
         if not self._validate_bounds(x, y, width, height):
             raise DSLExecutionError(f"Room '{name}' at ({x},{y}) size {width}x{height} exceeds bounds")
         
-        # Place room walls and floor
+        # Place room walls and floor with labels
         for i in range(y, y + height):
             for j in range(x, x + width):
-                if i == y or i == y + height - 1:  # Top/bottom walls
+                self._clear_room_labels(j, i)
+                if i == y or i == y + height - 1:
                     self.grid[i][j] = '#'
-                elif j == x or j == x + width - 1:  # Side walls  
+                    self._add_label(j, i, f"room:{name}")
+                    side = "north" if i == y else "south"
+                    self._add_label(j, i, f"wall:{side}")
+                    idx = j - x
+                    self._add_label(j, i, f"wall_index:{idx}")
+                elif j == x or j == x + width - 1:
                     self.grid[i][j] = '#'
-                else:  # Interior floor
+                    self._add_label(j, i, f"room:{name}")
+                    side = "west" if j == x else "east"
+                    self._add_label(j, i, f"wall:{side}")
+                    idx = i - y
+                    self._add_label(j, i, f"wall_index:{idx}")
+                else:
                     self.grid[i][j] = '.'
+                    self._add_label(j, i, f"room:{name}")
+                    self._add_label(j, i, "interior")
         
         return f"Created room '{name}' at ({x},{y}) size {width}x{height}"
     
-    def _cmd_corridor(self, x1: int, y1: int, x2: int, y2: int) -> str:
-        """Create corridor: corridor(10, 5, 15, 8)"""
+    def _cmd_door_on(self, room: str, wall: str, at: Optional[str], offset: Optional[int]) -> str:
         if not self.grid:
             raise DSLExecutionError("Must create grid first")
-        
-        # Simple L-shaped corridor
-        start_x, end_x = min(x1, x2), max(x1, x2)
-        for x in range(start_x, end_x + 1):
-            if self._in_bounds(x, y1):
-                self.grid[y1][x] = '.'
-        
-        start_y, end_y = min(y1, y2), max(y1, y2)
-        for y in range(start_y, end_y + 1):
-            if self._in_bounds(x2, y):
-                self.grid[y][x2] = '.'
-        
-        return f"Created corridor from ({x1},{y1}) to ({x2},{y2})"
-    
-    def _cmd_door(self, x: int, y: int, **properties) -> str:
-        """Place door: door(10, 5) or door(10, 5, locked=true)"""
-        if not self.grid or not self._in_bounds(x, y):
-            raise DSLExecutionError(f"Invalid door coordinates ({x},{y})")
-
+        coords = self._get_room_wall_coords(room, wall)
+        if not coords:
+            raise DSLExecutionError(f"Room '{room}' or wall '{wall}' not found")
+        valid = coords[1:-1] if len(coords) > 2 else []
+        if not valid:
+            raise DSLExecutionError(f"Wall too short for door on {room}.{wall}")
+        if offset is not None:
+            if offset <= 0 or offset >= len(coords)-1:
+                raise DSLExecutionError(f"Invalid offset {offset} for {room}.{wall}; valid 1..{len(coords)-2}")
+            idx = offset
+        elif at == "start":
+            idx = 1
+        elif at == "end":
+            idx = len(coords)-2
+        else:
+            idx = (len(coords)-1)//2
+            if idx == 0:
+                idx = 1
+            if idx >= len(coords)-1:
+                idx = len(coords)-2
+        x, y = coords[idx]
         self.grid[y][x] = '+'
-        return f"Placed door at ({x},{y})"
-    
-    def _cmd_spawn(self, entity_type: EntityType, x: int, y: int, **properties) -> str:
-        """Spawn entity: spawn(player, 10, 5) or spawn(ogre, 5, 8, hp=50)"""
-        if not self.grid or not self._in_bounds(x, y):
-            raise DSLExecutionError(f"Invalid spawn coordinates ({x},{y})")
+        return f"Placed door_on {room}.{wall} at ({x},{y})"
 
-        # Convert enum to string for storage
+    def _cmd_connect_by_walls(self, a: str, a_wall: str, b: str, b_wall: str, style: str = "L") -> str:
+        if not self.grid:
+            raise DSLExecutionError("Must create grid first")
+        a_coords = self._get_room_wall_coords(a, a_wall)
+        b_coords = self._get_room_wall_coords(b, b_wall)
+        if not a_coords or not b_coords:
+            raise DSLExecutionError("Could not find walls to connect")
+        ax, ay = a_coords[max(1, (len(a_coords)-1)//2)]
+        bx, by = b_coords[max(1, (len(b_coords)-1)//2)]
+        self.grid[ay][ax] = '+'
+        self.grid[by][bx] = '+'
+        def outside(x, y, wall_side):
+            if wall_side == "north":
+                return (x, y-1)
+            if wall_side == "south":
+                return (x, y+1)
+            if wall_side == "west":
+                return (x-1, y)
+            return (x+1, y)
+        sx, sy = outside(ax, ay, a_wall)
+        tx, ty = outside(bx, by, b_wall)
+        def carve_line(x0, y0, x1, y1):
+            start_x, end_x = (x0, x1) if x0 <= x1 else (x1, x0)
+            for x in range(start_x, end_x + 1):
+                if self._in_bounds(x, y0):
+                    self.grid[y0][x] = '.'
+            start_y, end_y = (y0, y1) if y0 <= y1 else (y1, y0)
+            for y in range(start_y, end_y + 1):
+                if self._in_bounds(x1, y):
+                    self.grid[y][x1] = '.'
+        if style == "I":
+            carve_line(sx, sy, tx, ty)
+        else:
+            midx, midy = tx, sy
+            carve_line(sx, sy, midx, midy)
+            carve_line(midx, midy, tx, ty)
+        return f"Connected {a}.{a_wall} to {b}.{b_wall}"
+
+    def _cmd_spawn_in(self, entity_type: EntityType, in_room: Optional[str], at: Optional[str], dx: int, dy: int, **properties) -> str:
+        if not self.grid:
+            raise DSLExecutionError("Must create grid first")
         entity_type_str = entity_type.value
-        
-        # Check if position is on floor or door
-        if self.grid[y][x] not in ['.', '+']:
-            return f"Warning: {entity_type_str} spawned at ({x},{y}) not on floor/door tile"
-
+        if in_room:
+            interior = self._get_room_interior_coords(in_room)
+            if not interior:
+                raise DSLExecutionError(f"Room '{in_room}' has no interior for spawning")
+            minx = min(p[0] for p in interior)
+            maxx = max(p[0] for p in interior)
+            miny = min(p[1] for p in interior)
+            maxy = max(p[1] for p in interior)
+            cx = (minx + maxx) // 2
+            cy = (miny + maxy) // 2
+            best = min(interior, key=lambda p: abs(p[0]-cx)+abs(p[1]-cy))
+            x, y = best[0] + dx, best[1] + dy
+            if not self._in_bounds(x, y) or self.grid[y][x] not in ['.', '+']:
+                x, y = best
+        else:
+            x, y = self.target_width//2, self.target_height//2
+            if self.grid[y][x] not in ['.', '+']:
+                found = False
+                for yy in range(1, self.target_height-1):
+                    for xx in range(1, self.target_width-1):
+                        if self.grid[yy][xx] in ['.', '+']:
+                            x, y = xx, yy
+                            found = True
+                            break
+                    if found:
+                        break
         if entity_type_str not in self.entities:
             self.entities[entity_type_str] = []
-
-        self.entities[entity_type_str].append(EntityData(
-            x=x, y=y, properties=properties
-        ))
-
+        self.entities[entity_type_str].append(EntityData(x=x, y=y, properties=properties))
         return f"Spawned {entity_type_str} at ({x},{y})"
     
     def _cmd_water_area(self, x: int, y: int, shape: str = "circle", radius: int = 3,
@@ -424,6 +524,43 @@ class DSLMapBuilder:
         for row in self.grid:
             lines.append(''.join(row))
         return '\n'.join(lines)
+
+    # Label helpers
+    def _add_label(self, x: int, y: int, label: str):
+        if self.labels is not None and self._in_bounds(x, y):
+            self.labels[y][x].add(label)
+
+    def _clear_room_labels(self, x: int, y: int):
+        if self.labels is None:
+            return
+        to_remove = {lab for lab in self.labels[y][x] if lab.startswith('room:') or lab.startswith('wall:') or lab.startswith('wall_index:') or lab == 'interior'}
+        self.labels[y][x] -= to_remove
+
+    def _get_room_wall_coords(self, room: str, wall: str) -> List[Tuple[int, int]]:
+        coords: List[Tuple[int, int]] = []
+        if self.labels is None:
+            return coords
+        for yy in range(self.target_height):
+            for xx in range(self.target_width):
+                labs = self.labels[yy][xx]
+                if f"room:{room}" in labs and f"wall:{wall}" in labs:
+                    coords.append((xx, yy))
+        if wall in ("north", "south"):
+            coords.sort(key=lambda p: p[0])
+        else:
+            coords.sort(key=lambda p: p[1])
+        return coords
+
+    def _get_room_interior_coords(self, room: str) -> List[Tuple[int, int]]:
+        coords: List[Tuple[int, int]] = []
+        if self.labels is None:
+            return coords
+        for yy in range(self.target_height):
+            for xx in range(self.target_width):
+                labs = self.labels[yy][xx]
+                if f"room:{room}" in labs and 'interior' in labs and self.grid[yy][xx] in ['.', '+']:
+                    coords.append((xx, yy))
+        return coords
     
     def to_map_data(self, map_id: str, prompt: str) -> MapData:
         """Convert to MapData format."""
@@ -580,7 +717,7 @@ class DSLMapGenerator:
         """Generate a map using DSL approach."""
         self.logger.info(f"Generating map {map_id} with DSL: {prompt}")
         
-        # System prompt for JSON DSL generation (tightened constraints, JSON-only)
+        # System prompt for JSON DSL generation (labels; door_on/connect_by_walls; region spawns)
         system_prompt = """You are a roguelike map generator that creates maps using JSON commands.
 
 RESPOND WITH JSON ONLY in this format:
@@ -588,12 +725,12 @@ RESPOND WITH JSON ONLY in this format:
 
 COMMANDS:
 - {"type": "grid", "width": 20, "height": 15} - Initialize 20x15 map
-- {"type": "room", "name": "string", "x": int, "y": int, "width": int, "height": int} - Create room
-- {"type": "corridor", "x1": int, "y1": int, "x2": int, "y2": int} - L-shaped corridor
-- {"type": "door", "x": int, "y": int} - Place door
-- {"type": "spawn", "entity": "string", "x": int, "y": int} - Spawn entity
-- {"type": "water_area", "x": int, "y": int, "shape": "circle|rectangle", "radius": int} - Water
-- {"type": "river", "points": [[x,y], [x,y], ...], "width": int} - River path
+- {"type": "room", "name": "string", "x": int, "y": int, "width": int, "height": int} - Create room (labels tiles: room:<name>, wall:<side>, interior)
+- {"type": "door_on", "room": "name", "wall": "north|south|east|west", "at": "center|start|end", "offset": int} - Place a door on a room wall (no raw coordinates)
+- {"type": "connect_by_walls", "a": "roomA", "a_wall": "east", "b": "roomB", "b_wall": "west", "style": "L|I"} - Place doors on both walls and carve corridor
+- {"type": "spawn", "entity": "string", "in": "room", "at": "center", "dx": 0, "dy": 0} - Spawn in a room region
+- {"type": "water_area", "x": int, "y": int, "shape": "circle|rectangle", "radius": int} - Water (optional)
+- {"type": "river", "points": [[x,y], [x,y], ...], "width": int} - River path (optional)
 - {"type": "checkpoint", "name": "string", "verify_connectivity": false, "full_verification": false} - Checkpoint
 
 ENTITY TYPES: player, ogre, goblin, shop, chest, tomb, spirit, human
@@ -601,19 +738,22 @@ ENTITY TYPES: player, ogre, goblin, shop, chest, tomb, spirit, human
 CRITICAL RULES:
 1. MUST have exactly one "player" spawn
 2. Grid MUST be 20x15
-3. Connect areas with corridors/doors
-4. Use checkpoints: after rooms (structure), after connectivity (verify_connectivity=true), and final (full_verification=true)
-5. Coordinate bounds (0-indexed): x in [0,19], y in [0,14]
-   Rooms MUST fit entirely: x + width <= 20 and y + height <= 15
+3. Only use door_on/connect_by_walls for doors; do NOT place doors by raw coordinates
+4. Use checkpoints: after structure, after connectivity (verify_connectivity=true), final (full_verification=true)
+5. Bounds (0-indexed): x in [0,19], y in [0,14]; rooms must fit: x+width<=20, y+height<=15
+6. door_on offset hint: do not use 0; valid offsets are 1..(wall_length-2). Prefer at:"center" when unsure.
 
 EXAMPLE:
 {
   "commands": [
     {"type": "grid", "width": 20, "height": 15},
-    {"type": "room", "name": "tavern", "x": 2, "y": 2, "width": 12, "height": 8},
+    {"type": "room", "name": "tavern", "x": 4, "y": 3, "width": 10, "height": 6},
+    {"type": "room", "name": "hall", "x": 12, "y": 6, "width": 6, "height": 5},
+    {"type": "door_on", "room": "tavern", "wall": "north", "at": "center"},
+    {"type": "connect_by_walls", "a": "tavern", "a_wall": "east", "b": "hall", "b_wall": "west", "style": "L"},
     {"type": "checkpoint", "name": "structure"},
-    {"type": "spawn", "entity": "player", "x": 8, "y": 6},
-    {"type": "spawn", "entity": "ogre", "x": 5, "y": 5},
+    {"type": "spawn", "entity": "player", "in": "tavern", "at": "center"},
+    {"type": "spawn", "entity": "goblin", "in": "hall", "dx": 1},
     {"type": "checkpoint", "name": "connected", "verify_connectivity": true},
     {"type": "checkpoint", "name": "complete", "full_verification": true}
   ]
@@ -708,6 +848,7 @@ Constraints (restate precisely):
 - Grid must be 20x15.
 - Coordinates are 0-indexed. x in [0,19], y in [0,14].
 - Rooms must fit entirely: x + width <= 20, y + height <= 15.
+- Use door_on(room, wall, at/offset) or connect_by_walls only for doors/corridors.
 - Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
 - Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
 
@@ -736,8 +877,8 @@ Previous JSON:
   "commands": [
     {"type": "grid", "width": 20, "height": 15},
     {"type": "room", "name": "main", "x": 2, "y": 2, "width": 16, "height": 11},
-    {"type": "door", "x": 10, "y": 2},
-    {"type": "spawn", "entity": "player", "x": 10, "y": 7},
+    {"type": "door_on", "room": "main", "wall": "north", "at": "center"},
+    {"type": "spawn", "entity": "player", "in": "main", "at": "center"},
     {"type": "checkpoint", "name": "fallback", "full_verification": true}
   ]
 }"""

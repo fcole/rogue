@@ -21,10 +21,9 @@ def test_parser():
         # Basic commands
         '{"commands": [{"type": "grid", "width": 20, "height": 15}]}',
         '{"commands": [{"type": "room", "name": "tavern", "x": 2, "y": 2, "width": 10, "height": 8}]}',
-        '{"commands": [{"type": "corridor", "x1": 10, "y1": 5, "x2": 15, "y2": 8}]}',
-        '{"commands": [{"type": "door", "x": 10, "y": 5}]}',
-        '{"commands": [{"type": "spawn", "entity": "player", "x": 8, "y": 6}]}',
-        '{"commands": [{"type": "spawn", "entity": "ogre", "x": 15, "y": 4, "properties": {"hp": 50, "aggressive": true}}]}',
+        '{"commands": [{"type": "door_on", "room": "tavern", "wall": "north", "at": "center"}]}',
+        '{"commands": [{"type": "spawn", "entity": "player", "in": "tavern", "at": "center"}]}',
+        '{"commands": [{"type": "spawn", "entity": "ogre", "in": "tavern", "dx": 1, "properties": {"hp": 50, "aggressive": true}}]}',
         
         # Water features
         '{"commands": [{"type": "water_area", "x": 10, "y": 8, "shape": "circle", "radius": 4}]}',
@@ -55,16 +54,14 @@ def test_builder():
     {"type": "grid", "width": 20, "height": 15},
     {"type": "room", "name": "main_hall", "x": 2, "y": 2, "width": 12, "height": 8},
     {"type": "room", "name": "side_room", "x": 15, "y": 10, "width": 4, "height": 4},
+    {"type": "door_on", "room": "main_hall", "wall": "east", "at": "end"},
+    {"type": "connect_by_walls", "a": "main_hall", "a_wall": "east", "b": "side_room", "b_wall": "west", "style": "L"},
     {"type": "checkpoint", "name": "rooms_created", "stats": true},
-    {"type": "corridor", "x1": 14, "y1": 6, "x2": 15, "y2": 6},
-    {"type": "corridor", "x1": 15, "y1": 6, "x2": 17, "y2": 6},
-    {"type": "corridor", "x1": 17, "y1": 6, "x2": 17, "y2": 10},
-    {"type": "door", "x": 17, "y": 9},
     {"type": "checkpoint", "name": "connected", "verify_connectivity": true},
     {"type": "water_area", "x": 8, "y": 12, "shape": "circle", "radius": 2},
-    {"type": "spawn", "entity": "player", "x": 8, "y": 6},
-    {"type": "spawn", "entity": "ogre", "x": 17, "y": 12},
-    {"type": "spawn", "entity": "chest", "x": 5, "y": 5},
+    {"type": "spawn", "entity": "player", "in": "main_hall", "at": "center"},
+    {"type": "spawn", "entity": "ogre", "in": "side_room", "dx": 1},
+    {"type": "spawn", "entity": "chest", "in": "main_hall", "dx": -2, "dy": -1},
     {"type": "checkpoint", "name": "complete", "full_verification": true}
   ]
 }'''
@@ -112,10 +109,11 @@ def test_generator_mock():
   "commands": [
     {"type": "grid", "width": 20, "height": 15},
     {"type": "room", "name": "treasure_room", "x": 5, "y": 5, "width": 8, "height": 6},
+    {"type": "door_on", "room": "treasure_room", "wall": "north", "at": "center"},
     {"type": "checkpoint", "name": "room_placed"},
-    {"type": "spawn", "entity": "player", "x": 9, "y": 8},
-    {"type": "spawn", "entity": "chest", "x": 7, "y": 7},
-    {"type": "spawn", "entity": "ogre", "x": 11, "y": 7},
+    {"type": "spawn", "entity": "player", "in": "treasure_room", "at": "center"},
+    {"type": "spawn", "entity": "chest", "in": "treasure_room", "dx": -1},
+    {"type": "spawn", "entity": "ogre", "in": "treasure_room", "dx": 1},
     {"type": "checkpoint", "name": "entities_placed", "verify_entities": true},
     {"type": "checkpoint", "name": "final", "full_verification": true}
   ]
