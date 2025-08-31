@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 import time
 import logging
+from datetime import datetime
 
 # Enable detailed logging to see what's happening during connectivity fixes
 logging.basicConfig(
@@ -46,6 +47,7 @@ def main():
     parser.add_argument("--generate", action="store_true", help="Generate maps from test suite")
     parser.add_argument("--verify", action="store_true", help="Verify generated maps")
     parser.add_argument("--report", action="store_true", help="Generate HTML report")
+    parser.add_argument("--pdf", action="store_true", help="Also save HTML report as PDF")
     # Generator selection
     parser.add_argument(
         "--generator",
@@ -69,6 +71,8 @@ def main():
         help="Show detailed LLM conversation and generation steps",
     )
     args = parser.parse_args()
+
+    pdf_report_path = None
     
     # If no specific steps are requested, run the complete suite
     if not any([args.generate, args.verify, args.report]):
@@ -120,12 +124,23 @@ def main():
     if args.report:
         if run_command("report", "Generating HTML report") != 0:
             sys.exit(1)
+        if args.pdf:
+            try:
+                import pdfkit
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                pdf_report_path = Path("data") / f"report_{timestamp}.pdf"
+                pdfkit.from_file("data/report.html", pdf_report_path)
+                print(f"📝 PDF report saved: {pdf_report_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to create PDF report: {e}")
     
     print("\n🎉 Test suite completed successfully!")
     
     # Show appropriate summary based on what was run
     if args.verify and args.report:
         print(f"📊 View results: file://{Path('data/report.html').absolute()}")
+        if pdf_report_path:
+            print(f"📄 PDF report: {pdf_report_path.absolute()}")
         
         try:
             import json
@@ -163,6 +178,8 @@ def main():
     elif args.verify:
         print("\n✅ Verification completed successfully!")
         print(f"📊 View results: file://{Path('data/report.html').absolute()}")
+        if pdf_report_path:
+            print(f"📄 PDF report: {pdf_report_path.absolute()}")
         
         try:
             import json
@@ -180,6 +197,8 @@ def main():
     elif args.report:
         print(f"\n✅ Report generation completed successfully!")
         print(f"📊 View results: file://{Path('data/report.html').absolute()}")
+        if pdf_report_path:
+            print(f"📄 PDF report: {pdf_report_path.absolute()}")
 
 
 if __name__ == "__main__":
