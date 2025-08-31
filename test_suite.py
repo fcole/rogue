@@ -50,7 +50,7 @@ def main():
     parser.add_argument(
         "--generator",
         choices=["default", "ollama", "claude", "smart", "dsl"],
-        default="default",
+        default="dsl",
         help="Choose generator: default (config), ollama (Ollama tool-based), claude (Anthropic tool-based), smart (smart positioning), dsl (DSL-based)",
     )
     parser.add_argument(
@@ -62,6 +62,11 @@ def main():
         "--visualize",
         action="store_true",
         help="Print visual representation of maps during generation",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed LLM conversation and generation steps",
     )
     args = parser.parse_args()
     
@@ -85,6 +90,8 @@ def main():
         gen_flags = ["generate", "--example"]
         if args.visualize:
             gen_flags.append("--visualize")
+        if args.verbose:
+            gen_flags.append("--verbose")
         if args.generator == "ollama":
             gen_flags.append("--use-ollama-tools")
         elif args.generator == "claude":

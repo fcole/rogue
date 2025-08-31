@@ -196,27 +196,27 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
     """
     
     # Collect failed results for summary
-    failed_results = [r for r in gen_data["results"] if r["status"] != "success"]
+    failed_results = [r for r in gen_data["results"] if r.status != "success"]
 
     # Process each successful map
     for gen_result in gen_data["results"]:
-        if gen_result["status"] != "success":
+        if gen_result.status != "success":
             continue
-            
+
         # Load map data
-        map_file = Path(gen_result["map_file"])
+        map_file = Path(gen_result.map_file)
         with open(map_file, 'r') as f:
             map_data_dict = json.load(f)
-        
+
         map_data = MapData(**map_data_dict)
-        
+
         # Get verification result
-        test_id = f"test_{gen_result['prompt_index']:03d}"
+        test_id = f"test_{gen_result.prompt_index:03d}"
         ver_result = ver_lookup.get(test_id, {})
-        
+
         # Generate map visualization
         visual = visualize_map(map_data)
-        
+
         # Determine score class
         score = ver_result.get("overall_score", 0)
         if score >= 8:
@@ -225,9 +225,9 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
             score_class = "score-good"
         else:
             score_class = "score-poor"
-        
+
         # Status class for warnings (dimension errors are most critical)
-        warnings = gen_result.get("warnings", [])
+        warnings = gen_result.warnings
         if not warnings:
             status_class = "status-success"
         elif any("dimension errors" in w.lower() for w in warnings):
@@ -236,11 +236,11 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
             status_class = "status-error"
         else:
             status_class = "status-warning"
-        
+
         html_content += f"""
             <div class="map-entry">
                 <div class="map-header">
-                    Map {gen_result['prompt_index']}: "{map_data.prompt}"
+                    Map {gen_result.prompt_index}: "{map_data.prompt}"
                 </div>
                 <div class="map-content">
                     <div>
@@ -255,11 +255,11 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                         <div class="score-badge {score_class}">
                             Score: {score:.1f}/10 {'✓ PASSED' if ver_result.get('passed', False) else '✗ FAILED'}
                         </div>
-                        
+
                         <div class="details-grid">
                             <div class="detail-item">
                                 <strong>Generation Time</strong>
-                                {gen_result['generation_time']:.2f} seconds
+                                {gen_result.generation_time:.2f} seconds
                             </div>
                             <div class="detail-item">
                                 <strong>Verification Time</strong>
@@ -274,9 +274,9 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                                 {'✓ Connected' if ver_result.get('quantitative_checks', {}).get('connectivity', {}).get('passed', False) else '✗ Disconnected'}
                             </div>
                         </div>
-                        
+
                         {_generate_verification_details(ver_result)}
-                        
+
                         {_generate_entity_details(map_data)}
                     </div>
                 </div>
@@ -298,7 +298,7 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
         """
 
         for failed_result in failed_results:
-            error_msg = failed_result.get("error_message", "Unknown error")
+            error_msg = failed_result.error_message or "Unknown error"
             # Truncate very long error messages for display
             if len(error_msg) > 200:
                 error_msg = error_msg[:200] + "..."
@@ -306,14 +306,14 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
             html_content += f"""
                     <div style="background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; padding: 20px;">
                         <h4 style="color: #c53030; margin-top: 0; margin-bottom: 10px;">
-                            Map {failed_result['prompt_index']}: Failed Generation
+                            Map {failed_result.prompt_index}: Failed Generation
                         </h4>
                         <div style="background: #fed7d7; padding: 10px; border-radius: 4px; margin-bottom: 10px;">
                             <strong>Error:</strong> {error_msg}
                         </div>
                         <div style="color: #744210;">
-                            <strong>Generation Time:</strong> {failed_result.get('generation_time', 0):.2f} seconds<br>
-                            <strong>Status:</strong> {failed_result.get('status', 'unknown')}
+                            <strong>Generation Time:</strong> {failed_result.generation_time:.2f} seconds<br>
+                            <strong>Status:</strong> {failed_result.status}
                         </div>
                     </div>
             """

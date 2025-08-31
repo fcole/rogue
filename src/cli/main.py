@@ -29,12 +29,13 @@ def main():
 @click.option("--output", "-o", type=click.Path(), default="data/generated", help="Output directory")
 @click.option("--example", is_flag=True, help="Run with example prompts")
 @click.option("--visualize", is_flag=True, help="Print visual representation of maps")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed LLM conversation and generation steps")
 @click.option("--use-ollama-tools", is_flag=True, help="Use Ollama tool-based generator (local, guarantees constraints)")
 @click.option("--use-tools", is_flag=True, help="Use Claude tool-based generator (Anthropic)")
 @click.option("--use-smart-positioning", is_flag=True, help="Use smart positioning generator (easier for LLMs)")
 @click.option("--use-dsl", is_flag=True, help="Use DSL-based generator (structured commands, efficient)")
 @click.option("--ollama-endpoint", type=str, help="Override Ollama endpoint, e.g., http://host.docker.internal:11434")
-def generate(prompts, prompt, output, example, visualize, use_ollama_tools, use_tools, use_smart_positioning, use_dsl, ollama_endpoint):
+def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_tools, use_tools, use_smart_positioning, use_dsl, ollama_endpoint):
     """Generate roguelike maps from text prompts."""
     
     # Determine prompts to use
@@ -74,7 +75,7 @@ def generate(prompts, prompt, output, example, visualize, use_ollama_tools, use_
         if use_dsl:
             from ..generator.dsl_generator import DSLMapGenerator
             generator_type = "DSL-based"
-            generator = DSLMapGenerator()
+            generator = DSLMapGenerator(verbose=verbose)
         elif use_ollama_tools:
             from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
             generator_type = "Ollama tool-based"
@@ -174,11 +175,11 @@ def generate(prompts, prompt, output, example, visualize, use_ollama_tools, use_
     console.print(f"Average time: {summary['average_time']:.2f}s")
 
     # Show error details for failed generations
-    failed_results = [r for r in results["results"] if r.get("error_message")]
+    failed_results = [r for r in results["results"] if r.error_message]
     if failed_results:
         console.print(f"\n[red]Error Details:[/red]")
         for result in failed_results:
-            console.print(f"  • Map {result['prompt_index']}: {result['error_message'][:100]}{'...' if len(result['error_message']) > 100 else ''}")
+            console.print(f"  • Map {result.prompt_index}: {result.error_message[:100]}{'...' if len(result.error_message) > 100 else ''}")
 
     console.print(f"Results saved to: {results_file}")
 
