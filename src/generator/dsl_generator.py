@@ -129,11 +129,11 @@ class DSLMapBuilder:
         
         return f"Created corridor from ({x1},{y1}) to ({x2},{y2})"
     
-    def _cmd_door(self, x: int, y: int) -> str:
-        """Place door: door(10, 5)"""
+    def _cmd_door(self, x: int, y: int, **properties) -> str:
+        """Place door: door(10, 5) or door(10, 5, locked=true)"""
         if not self.grid or not self._in_bounds(x, y):
             raise DSLExecutionError(f"Invalid door coordinates ({x},{y})")
-        
+
         self.grid[y][x] = '+'
         return f"Placed door at ({x},{y})"
     
@@ -160,8 +160,8 @@ class DSLMapBuilder:
         
         return f"Spawned {entity_type} at ({x},{y})"
     
-    def _cmd_water_area(self, x: int, y: int, shape: str = "circle", radius: int = 3, 
-                       width: int = 6, height: int = 4) -> str:
+    def _cmd_water_area(self, x: int, y: int, shape: str = "circle", radius: int = 3,
+                       width: int = 6, height: int = 4, **properties) -> str:
         """Create water area: water_area(10, 8, "circle", radius=4)"""
         if not self.grid:
             raise DSLExecutionError("Must create grid first")
@@ -184,7 +184,7 @@ class DSLMapBuilder:
         
         return f"Created {shape} water area at ({x},{y})"
     
-    def _cmd_river(self, points: List[Tuple[int, int]], width: int = 2) -> str:
+    def _cmd_river(self, points: List[Tuple[int, int]], width: int = 2, **properties) -> str:
         """Create river: river([(5,5), (10,8), (15,12)], width=3)"""
         if not self.grid:
             raise DSLExecutionError("Must create grid first")
@@ -228,9 +228,9 @@ class DSLMapBuilder:
         
         return f"Created river through {len(points)} points with width {width}"
     
-    def _cmd_checkpoint(self, name: str, verify_connectivity: bool = False, 
+    def _cmd_checkpoint(self, name: str, verify_connectivity: bool = False,
                        verify_entities: bool = False, full_verification: bool = False,
-                       stats: bool = False) -> str:
+                       stats: bool = False, **properties) -> str:
         """Create checkpoint: checkpoint("rooms_done", verify_connectivity=True)"""
         if not self.grid:
             raise DSLExecutionError("Cannot checkpoint without grid")
