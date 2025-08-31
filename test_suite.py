@@ -49,9 +49,9 @@ def main():
     # Generator selection
     parser.add_argument(
         "--generator",
-        choices=["default", "ollama", "claude", "smart", "dsl"],
+        choices=["default", "ollama", "claude", "smart", "dsl", "claude-dsl"],
         default="dsl",
-        help="Choose generator: default (config), ollama (Ollama tool-based), claude (Anthropic tool-based), smart (smart positioning), dsl (DSL-based)",
+        help="Choose generator: default (config), ollama (Ollama tool-based), claude (Anthropic tool-based), smart (smart positioning), dsl (DSL-based), claude-dsl (DSL with Claude)",
     )
     parser.add_argument(
         "--ollama-endpoint",
@@ -100,6 +100,8 @@ def main():
             gen_flags.append("--use-smart-positioning")
         elif args.generator == "dsl":
             gen_flags.append("--use-dsl")
+        elif args.generator == "claude-dsl":
+            gen_flags.append("--use-claude-dsl")
         if args.ollama_endpoint:
             gen_flags += ["--ollama-endpoint", args.ollama_endpoint]
 

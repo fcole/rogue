@@ -34,8 +34,9 @@ def main():
 @click.option("--use-tools", is_flag=True, help="Use Claude tool-based generator (Anthropic)")
 @click.option("--use-smart-positioning", is_flag=True, help="Use smart positioning generator (easier for LLMs)")
 @click.option("--use-dsl", is_flag=True, help="Use DSL-based generator (structured commands, efficient)")
+@click.option("--use-claude-dsl", is_flag=True, help="Use DSL-based generator with Claude (Anthropic)")
 @click.option("--ollama-endpoint", type=str, help="Override Ollama endpoint, e.g., http://host.docker.internal:11434")
-def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_tools, use_tools, use_smart_positioning, use_dsl, ollama_endpoint):
+def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_tools, use_tools, use_smart_positioning, use_dsl, use_claude_dsl, ollama_endpoint):
     """Generate roguelike maps from text prompts."""
     
     # Determine prompts to use
@@ -76,6 +77,10 @@ def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_to
             from ..generator.dsl_generator import DSLMapGenerator
             generator_type = "DSL-based"
             generator = DSLMapGenerator(verbose=verbose)
+        elif use_claude_dsl:
+            from ..generator.dsl_generator import DSLMapGenerator
+            generator_type = "DSL-based (Claude)"
+            generator = DSLMapGenerator(provider="anthropic", verbose=verbose)
         elif use_ollama_tools:
             from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
             generator_type = "Ollama tool-based"
