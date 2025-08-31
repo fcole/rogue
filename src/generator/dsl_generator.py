@@ -492,23 +492,39 @@ class DSLParser:
 class DSLMapGenerator:
     """Map generator using DSL approach with selective checkpointing."""
     
-    def __init__(self):
+    def __init__(self, provider: str = None, verbose: bool = False):
         self.config = load_config("generator.json")
         try:
             self.secrets = load_secrets()
         except Exception:
             self.secrets = {}
         
-        api_key = self.secrets.get("anthropic_api_key")
-        if not api_key:
-            raise RuntimeError("Missing Anthropic API key in config/secrets.json")
+        # Use provided provider or fall back to config default
+        if provider is None:
+            provider = self.config.get("llm", {}).get("provider", "ollama")
         
+        # Create LLM client using the factory method
         try:
-            import anthropic
-        except ImportError as e:
-            raise RuntimeError("Anthropic client not available. Install 'anthropic' package.") from e
+            from ..shared.llm_client import LLMClient
+            if provider == "anthropic":
+                # For Anthropic, we need the API key
+                api_key = self.secrets.get("anthropic_api_key")
+                if not api_key:
+                    raise RuntimeError("Missing Anthropic API key in config/secrets.json")
+                self.client = LLMClient.create("anthropic", 
+                                             model=self.config.get("anthropic", {}).get("model", "claude-3-5-sonnet-20241022"),
+                                             temperature=self.config.get("anthropic", {}).get("temperature", 0.7))
+            else:
+                # Default to Ollama
+                self.client = LLMClient.create("ollama",
+                                             model=self.config.get("ollama", {}).get("model", "deepseek-coder:33b-instruct"),
+                                             endpoint=self.config.get("ollama", {}).get("endpoint", "http://localhost:11434"),
+                                             temperature=self.config.get("ollama", {}).get("temperature", 0.2))
+        except Exception as e:
+            raise RuntimeError(f"Failed to create LLM client for provider '{provider}': {e}")
         
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.provider = provider
+        self.verbose = verbose
         self.logger = logging.getLogger(__name__)
         self.parser = DSLParser()
     
@@ -618,15 +634,19 @@ Generate a complete DSL program for the requested map. Use checkpoints wisely to
         
         while iteration < max_iterations:
             try:
-                # Get DSL program from Claude
-                response = self.client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=2000,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}]
-                )
+                # Get DSL program from LLM
+                program_text = self.client.query(user_prompt, system_prompt)
                 
-                program_text = response.content[0].text
+                # Show conversation if verbose mode is enabled
+                if self.verbose:
+                    response_type = "Retry" if iteration > 0 else "LLM"
+                    print(f"\n🤖 {response_type} Response (Iteration {iteration + 1}):")
+                    print("=" * 60)
+                    if iteration == 0:
+                        print(f"System Prompt: {system_prompt[:200]}...")
+                    print(f"User Prompt: {user_prompt}")
+                    print(f"Response: {program_text}")
+                    print("=" * 60)
                 
                 # Extract DSL code from response (handle code blocks)
                 if "```" in program_text:
@@ -654,6 +674,9 @@ Previous program:
 ```
 {program_text}
 ```"""
+                    
+
+                    
                     iteration += 1
                     continue
                 

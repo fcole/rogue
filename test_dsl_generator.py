@@ -9,6 +9,7 @@ and can be used to compare token efficiency against the tool-based approach.
 import sys
 import json
 import time
+import argparse
 from src.generator.dsl_generator import DSLMapGenerator, DSLMapBuilder, DSLParser
 
 def test_parser():
@@ -216,13 +217,22 @@ def main():
     
     print("\n✨ All tests completed!")
     print("\nTo test with real API calls:")
-    print("  python test_dsl_generator.py --real-api")
+    print("  python test_dsl_generator.py --real-api                    # Use Ollama (default)")
+    print("  python test_dsl_generator.py --real-api --provider ollama  # Use Ollama explicitly")
+    print("  python test_dsl_generator.py --real-api --provider anthropic  # Use Anthropic")
 
 if __name__ == "__main__":
-    if "--real-api" in sys.argv:
-        print("🚀 Testing with real Anthropic API...")
+    parser = argparse.ArgumentParser(description="Test DSL Map Generator")
+    parser.add_argument("--real-api", action="store_true", help="Run tests with real API calls (Ollama or Anthropic)")
+    parser.add_argument("--provider", choices=["ollama", "anthropic"], default="ollama", 
+                       help="Choose LLM provider (default: ollama)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed LLM conversation")
+    args = parser.parse_args()
+
+    if args.real_api:
+        print(f"🚀 Testing with real {args.provider.upper()} API...")
         try:
-            generator = DSLMapGenerator()
+            generator = DSLMapGenerator(provider=args.provider, verbose=args.verbose)
             prompts = ["a simple tavern with one ogre"]
             
             start_time = time.time()
@@ -239,11 +249,20 @@ if __name__ == "__main__":
                 print(f"📋 Checkpoints used: {map_data.metadata.get('checkpoints_used', [])}")
                 
                 # Show the map
+                from src.shared.utils import visualize_map
                 print("\nFinal map:")
-                print(map_data.tiles)
+                print(visualize_map(map_data))
                 
         except Exception as e:
             print(f"❌ Real API test failed: {e}")
-            print("Make sure you have valid Anthropic API key in config/secrets.json")
+            if args.provider == "anthropic":
+                print("Make sure you have valid Anthropic API key in config/secrets.json")
+            else:
+                print("Make sure Ollama is running: ollama serve")
+                # Get the model from config
+                from src.shared.utils import load_config
+                config = load_config("generator.json")
+                ollama_model = config.get("ollama", {}).get("model", "deepseek-coder:33b-instruct")
+                print(f"And you have the required model: ollama pull {ollama_model}")
     else:
         main()
