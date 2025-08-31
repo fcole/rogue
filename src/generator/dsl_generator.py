@@ -580,7 +580,7 @@ class DSLMapGenerator:
         """Generate a map using DSL approach."""
         self.logger.info(f"Generating map {map_id} with DSL: {prompt}")
         
-        # System prompt for JSON DSL generation (simplified - avoid huge schema)
+        # System prompt for JSON DSL generation (tightened constraints, JSON-only)
         system_prompt = """You are a roguelike map generator that creates maps using JSON commands.
 
 RESPOND WITH JSON ONLY in this format:
@@ -602,7 +602,9 @@ CRITICAL RULES:
 1. MUST have exactly one "player" spawn
 2. Grid MUST be 20x15
 3. Connect areas with corridors/doors
-4. Use checkpoints: after rooms, after connectivity, final
+4. Use checkpoints: after rooms (structure), after connectivity (verify_connectivity=true), and final (full_verification=true)
+5. Coordinate bounds (0-indexed): x in [0,19], y in [0,14]
+   Rooms MUST fit entirely: x + width <= 20 and y + height <= 15
 
 EXAMPLE:
 {
@@ -612,6 +614,7 @@ EXAMPLE:
     {"type": "checkpoint", "name": "structure"},
     {"type": "spawn", "entity": "player", "x": 8, "y": 6},
     {"type": "spawn", "entity": "ogre", "x": 5, "y": 5},
+    {"type": "checkpoint", "name": "connected", "verify_connectivity": true},
     {"type": "checkpoint", "name": "complete", "full_verification": true}
   ]
 }
@@ -620,7 +623,8 @@ Generate valid JSON only."""
 
         user_prompt = f'Create a DSL program for: "{prompt}"'
         
-        max_iterations = 5
+        # Honor configured retry count
+        max_iterations = int(self.config.get("llm", {}).get("max_retries", 3))
         iteration = 0
         
         while iteration < max_iterations:
@@ -659,21 +663,27 @@ Generate valid JSON only."""
                 builder = DSLMapBuilder()
                 execution_result = self._execute_dsl_program(program_json, builder)
                 
-                # Check if we need to retry based on execution result
-                if "❌" in execution_result:  # Error indicators in checkpoint output
-                    user_prompt = f"""The JSON DSL program had issues:
+                # If checkpoints indicated issues, or no checkpoints provided, trigger a surgical retry
+                issues_detected = "❌" in execution_result
+                no_checkpoints = len(builder.checkpoints) == 0
+                if issues_detected or no_checkpoints:
+                    # Build compact, constraint-focused retry prompt without ASCII map noise
+                    reason = "no checkpoints were provided" if no_checkpoints else "checkpoint verification reported issues"
+                    user_prompt = f"""The JSON DSL program needs correction because {reason}.
 
-{execution_result}
+Constraints (restate precisely):
+- Grid must be 20x15.
+- Coordinates are 0-indexed. x in [0,19], y in [0,14].
+- Rooms must fit entirely: x + width <= 20, y + height <= 15.
+- Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
+- Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
 
-Please fix the JSON and try again. Original request: "{prompt}"
+Return JSON only.
 
 Previous JSON:
 ```json
 {program_json}
 ```"""
-                    
-
-                    
                     iteration += 1
                     continue
                 
@@ -690,18 +700,23 @@ Previous JSON:
                 # Log the specific error for debugging
                 print(f"❌ JSON DSL Error (Iteration {iteration + 1}): {error_msg}")
 
-                user_prompt = f"""JSON DSL execution failed:
+                user_prompt = f"""JSON DSL execution failed with the following error:
 
 {error_msg}
 
-Please fix the JSON. Original request: "{prompt}"
+Constraints (restate precisely):
+- Grid must be 20x15.
+- Coordinates are 0-indexed. x in [0,19], y in [0,14].
+- Rooms must fit entirely: x + width <= 20, y + height <= 15.
+- Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
+- Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
+
+Return JSON only. Original request: "{prompt}"
 
 Previous JSON:
 ```json
 {program_json}
-```
-
-Remember to provide valid JSON that follows the schema exactly."""
+```"""
                 iteration += 1
                 continue
 
@@ -744,7 +759,11 @@ Remember to provide valid JSON that follows the schema exactly."""
                     
             except DSLExecutionError as e:
                 e.command_index = command_index
-                e.command = f"{command.type}({command.model_dump()})"
+                # Provide a JSON-formatted command for clearer fixes
+                try:
+                    e.command = f"{command.type}({json.dumps(command.model_dump())})"
+                except Exception:
+                    e.command = f"{command.type}({command.model_dump()})"
                 raise e
         
         return "\n\n".join(checkpoint_outputs) if checkpoint_outputs else "Program executed successfully (no checkpoints)"
