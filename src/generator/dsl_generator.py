@@ -31,10 +31,23 @@ import time
 from typing import Dict, Any, List, Optional, Tuple, Union, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
+from enum import Enum
 
 from ..shared.utils import load_config, load_secrets
 from ..shared.models import MapData, EntityData, GenerationResult
 from ..shared.connectivity import check_map_connectivity
+
+
+class EntityType(str, Enum):
+    """Valid entity types for spawning."""
+    PLAYER = "player"
+    OGRE = "ogre"
+    GOBLIN = "goblin"
+    SHOP = "shop"
+    CHEST = "chest"
+    TOMB = "tomb"
+    SPIRIT = "spirit"
+    HUMAN = "human"
 
 
 class DSLExecutionError(Exception):
@@ -61,43 +74,43 @@ class RoomCommand(BaseCommand):
     """Create a rectangular room."""
     type: Literal["room"] = "room"
     name: str = Field(description="Name of the room")
-    x: int = Field(ge=0, description="Left edge X coordinate")
-    y: int = Field(ge=0, description="Top edge Y coordinate")
-    width: int = Field(gt=0, description="Room width")
-    height: int = Field(gt=0, description="Room height")
+    x: int = Field(ge=0, le=19, description="Left edge X coordinate (0-19)")
+    y: int = Field(ge=0, le=14, description="Top edge Y coordinate (0-14)")
+    width: int = Field(ge=1, description="Room width")
+    height: int = Field(ge=1, description="Room height")
 
 
 class CorridorCommand(BaseCommand):
     """Create an L-shaped corridor between two points."""
     type: Literal["corridor"] = "corridor"
-    x1: int = Field(ge=0, description="Start X coordinate")
-    y1: int = Field(ge=0, description="Start Y coordinate")
-    x2: int = Field(ge=0, description="End X coordinate")
-    y2: int = Field(ge=0, description="End Y coordinate")
+    x1: int = Field(ge=0, le=19, description="Start X coordinate (0-19)")
+    y1: int = Field(ge=0, le=14, description="Start Y coordinate (0-14)")
+    x2: int = Field(ge=0, le=19, description="End X coordinate (0-19)")
+    y2: int = Field(ge=0, le=14, description="End Y coordinate (0-14)")
 
 
 class DoorCommand(BaseCommand):
     """Place a door at coordinates."""
     type: Literal["door"] = "door"
-    x: int = Field(ge=0, description="Door X coordinate")
-    y: int = Field(ge=0, description="Door Y coordinate")
+    x: int = Field(ge=0, le=19, description="Door X coordinate (0-19)")
+    y: int = Field(ge=0, le=14, description="Door Y coordinate (0-14)")
     properties: Dict[str, Any] = Field(default_factory=dict, description="Optional door properties")
 
 
 class SpawnCommand(BaseCommand):
     """Spawn an entity at coordinates."""
     type: Literal["spawn"] = "spawn"
-    entity: str = Field(description="Entity type (player, ogre, goblin, shop, chest, tomb, spirit, human)")
-    x: int = Field(ge=0, description="Spawn X coordinate")
-    y: int = Field(ge=0, description="Spawn Y coordinate")
+    entity: EntityType = Field(description="Entity type to spawn")
+    x: int = Field(ge=0, le=19, description="Spawn X coordinate (0-19)")
+    y: int = Field(ge=0, le=14, description="Spawn Y coordinate (0-14)")
     properties: Dict[str, Any] = Field(default_factory=dict, description="Optional entity properties")
 
 
 class WaterAreaCommand(BaseCommand):
     """Create a water area."""
     type: Literal["water_area"] = "water_area"
-    x: int = Field(ge=0, description="Center X coordinate")
-    y: int = Field(ge=0, description="Center Y coordinate")
+    x: int = Field(ge=0, le=19, description="Center X coordinate (0-19)")
+    y: int = Field(ge=0, le=14, description="Center Y coordinate (0-14)")
     shape: Literal["circle", "rectangle"] = Field("circle", description="Shape of water area")
     radius: int = Field(3, ge=1, description="Radius for circle shape")
     width: int = Field(6, ge=1, description="Width for rectangle shape")
@@ -133,7 +146,7 @@ DSLCommand = Union[
     SpawnCommand,
     WaterAreaCommand,
     RiverCommand,
-    CheckpointCommand,
+    CheckpointCommand
 ]
 
 
@@ -237,28 +250,26 @@ class DSLMapBuilder:
         self.grid[y][x] = '+'
         return f"Placed door at ({x},{y})"
     
-    def _cmd_spawn(self, entity_type: str, x: int, y: int, **properties) -> str:
+    def _cmd_spawn(self, entity_type: EntityType, x: int, y: int, **properties) -> str:
         """Spawn entity: spawn(player, 10, 5) or spawn(ogre, 5, 8, hp=50)"""
         if not self.grid or not self._in_bounds(x, y):
             raise DSLExecutionError(f"Invalid spawn coordinates ({x},{y})")
-        
-        # Normalize entity type
-        entity_type = self._normalize_entity_type(entity_type)
-        if not entity_type:
-            raise DSLExecutionError(f"Unknown entity type: {entity_type}")
+
+        # Convert enum to string for storage
+        entity_type_str = entity_type.value
         
         # Check if position is on floor or door
         if self.grid[y][x] not in ['.', '+']:
-            return f"Warning: {entity_type} spawned at ({x},{y}) not on floor/door tile"
-        
-        if entity_type not in self.entities:
-            self.entities[entity_type] = []
-        
-        self.entities[entity_type].append(EntityData(
+            return f"Warning: {entity_type_str} spawned at ({x},{y}) not on floor/door tile"
+
+        if entity_type_str not in self.entities:
+            self.entities[entity_type_str] = []
+
+        self.entities[entity_type_str].append(EntityData(
             x=x, y=y, properties=properties
         ))
-        
-        return f"Spawned {entity_type} at ({x},{y})"
+
+        return f"Spawned {entity_type_str} at ({x},{y})"
     
     def _cmd_water_area(self, x: int, y: int, shape: str = "circle", radius: int = 3,
                        width: int = 6, height: int = 4, **properties) -> str:
@@ -513,9 +524,6 @@ class DSLMapGenerator:
         self.verbose = verbose
         self.logger = logging.getLogger(__name__)
         self.parser = DSLParser()
-        
-        # Generate JSON Schema for LLM guidance
-        self.json_schema = DSLProgram.model_json_schema()
     
     def generate_maps(self, prompts: List[str]) -> Dict[str, Any]:
         """Generate maps for multiple prompts."""
