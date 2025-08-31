@@ -27,10 +27,10 @@ checkpoint("complete", full_verification=True)
 
 import json
 import logging
-import re
 import time
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple, Union, Literal
 from datetime import datetime
+from pydantic import BaseModel, Field, ValidationError
 
 from ..shared.utils import load_config, load_secrets
 from ..shared.models import MapData, EntityData, GenerationResult
@@ -39,10 +39,107 @@ from ..shared.connectivity import check_map_connectivity
 
 class DSLExecutionError(Exception):
     """Error during DSL program execution."""
-    def __init__(self, message: str, line_number: int = None, command: str = None):
-        self.line_number = line_number
+    def __init__(self, message: str, command_index: int = None, command: str = None):
+        self.command_index = command_index
         self.command = command
         super().__init__(message)
+
+
+class BaseCommand(BaseModel):
+    """Base class for all DSL commands."""
+    type: str
+
+
+class GridCommand(BaseCommand):
+    """Initialize the map grid."""
+    type: Literal["grid"] = "grid"
+    width: int = Field(20, description="Grid width, must be exactly 20")
+    height: int = Field(15, description="Grid height, must be exactly 15")
+
+
+class RoomCommand(BaseCommand):
+    """Create a rectangular room."""
+    type: Literal["room"] = "room"
+    name: str = Field(description="Name of the room")
+    x: int = Field(ge=0, description="Left edge X coordinate")
+    y: int = Field(ge=0, description="Top edge Y coordinate")
+    width: int = Field(gt=0, description="Room width")
+    height: int = Field(gt=0, description="Room height")
+
+
+class CorridorCommand(BaseCommand):
+    """Create an L-shaped corridor between two points."""
+    type: Literal["corridor"] = "corridor"
+    x1: int = Field(ge=0, description="Start X coordinate")
+    y1: int = Field(ge=0, description="Start Y coordinate")
+    x2: int = Field(ge=0, description="End X coordinate")
+    y2: int = Field(ge=0, description="End Y coordinate")
+
+
+class DoorCommand(BaseCommand):
+    """Place a door at coordinates."""
+    type: Literal["door"] = "door"
+    x: int = Field(ge=0, description="Door X coordinate")
+    y: int = Field(ge=0, description="Door Y coordinate")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Optional door properties")
+
+
+class SpawnCommand(BaseCommand):
+    """Spawn an entity at coordinates."""
+    type: Literal["spawn"] = "spawn"
+    entity: str = Field(description="Entity type (player, ogre, goblin, shop, chest, tomb, spirit, human)")
+    x: int = Field(ge=0, description="Spawn X coordinate")
+    y: int = Field(ge=0, description="Spawn Y coordinate")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Optional entity properties")
+
+
+class WaterAreaCommand(BaseCommand):
+    """Create a water area."""
+    type: Literal["water_area"] = "water_area"
+    x: int = Field(ge=0, description="Center X coordinate")
+    y: int = Field(ge=0, description="Center Y coordinate")
+    shape: Literal["circle", "rectangle"] = Field("circle", description="Shape of water area")
+    radius: int = Field(3, ge=1, description="Radius for circle shape")
+    width: int = Field(6, ge=1, description="Width for rectangle shape")
+    height: int = Field(4, ge=1, description="Height for rectangle shape")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Optional water properties")
+
+
+class RiverCommand(BaseCommand):
+    """Create a river through multiple points."""
+    type: Literal["river"] = "river"
+    points: List[Tuple[int, int]] = Field(description="List of [x, y] coordinate pairs")
+    width: int = Field(2, ge=1, description="River width")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Optional river properties")
+
+
+class CheckpointCommand(BaseCommand):
+    """Create a checkpoint for visualization and verification."""
+    type: Literal["checkpoint"] = "checkpoint"
+    name: str = Field(description="Checkpoint name")
+    verify_connectivity: bool = Field(False, description="Check map connectivity")
+    verify_entities: bool = Field(False, description="Check entity placement")
+    full_verification: bool = Field(False, description="Run all verification checks")
+    stats: bool = Field(False, description="Show map statistics")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Optional checkpoint properties")
+
+
+# Union type for all commands
+DSLCommand = Union[
+    GridCommand,
+    RoomCommand,
+    CorridorCommand,
+    DoorCommand,
+    SpawnCommand,
+    WaterAreaCommand,
+    RiverCommand,
+    CheckpointCommand,
+]
+
+
+class DSLProgram(BaseModel):
+    """Complete DSL program with list of commands."""
+    commands: List[DSLCommand] = Field(description="List of DSL commands to execute")
 
 
 class DSLMapBuilder:
@@ -56,26 +153,29 @@ class DSLMapBuilder:
         self.checkpoints: Dict[str, Dict[str, Any]] = {}
         self.last_checkpoint = None
         
-    def execute_command(self, command: str, args: List[Any], kwargs: Dict[str, Any]) -> str:
-        """Execute a single DSL command."""
-        if command == "grid":
-            return self._cmd_grid(*args, **kwargs)
-        elif command == "room":
-            return self._cmd_room(*args, **kwargs)
-        elif command == "corridor":
-            return self._cmd_corridor(*args, **kwargs)
-        elif command == "door":
-            return self._cmd_door(*args, **kwargs)
-        elif command == "spawn":
-            return self._cmd_spawn(*args, **kwargs)
-        elif command == "water_area":
-            return self._cmd_water_area(*args, **kwargs)
-        elif command == "river":
-            return self._cmd_river(*args, **kwargs)
-        elif command == "checkpoint":
-            return self._cmd_checkpoint(*args, **kwargs)
+    def execute_command(self, command: DSLCommand) -> str:
+        """Execute a single DSL command from Pydantic model."""
+        if isinstance(command, GridCommand):
+            return self._cmd_grid(command.width, command.height)
+        elif isinstance(command, RoomCommand):
+            return self._cmd_room(command.name, command.x, command.y, command.width, command.height)
+        elif isinstance(command, CorridorCommand):
+            return self._cmd_corridor(command.x1, command.y1, command.x2, command.y2)
+        elif isinstance(command, DoorCommand):
+            return self._cmd_door(command.x, command.y, **command.properties)
+        elif isinstance(command, SpawnCommand):
+            return self._cmd_spawn(command.entity, command.x, command.y, **command.properties)
+        elif isinstance(command, WaterAreaCommand):
+            return self._cmd_water_area(command.x, command.y, command.shape, command.radius,
+                                       command.width, command.height, **command.properties)
+        elif isinstance(command, RiverCommand):
+            return self._cmd_river(command.points, command.width, **command.properties)
+        elif isinstance(command, CheckpointCommand):
+            return self._cmd_checkpoint(command.name, command.verify_connectivity,
+                                       command.verify_entities, command.full_verification,
+                                       command.stats, **command.properties)
         else:
-            raise DSLExecutionError(f"Unknown command: {command}")
+            raise DSLExecutionError(f"Unknown command type: {type(command)}")
     
     def _cmd_grid(self, width: int, height: int) -> str:
         """Initialize grid: grid(20, 15)"""
@@ -351,142 +451,28 @@ class DSLMapBuilder:
 
 
 class DSLParser:
-    """Parses DSL programs into executable commands."""
+    """Parses JSON DSL programs using Pydantic validation."""
     
-    def parse_program(self, program: str) -> List[Tuple[int, str, List[Any], Dict[str, Any]]]:
-        """Parse DSL program into (line_num, command, args, kwargs) tuples."""
-        commands = []
-        lines = program.strip().split('\n')
-        
-        for line_num, line in enumerate(lines, 1):
-            line = line.strip()
-            
-            # Skip empty lines and comments
-            if not line or line.startswith('#'):
-                continue
-            
-            try:
-                command, args, kwargs = self._parse_line(line)
-                commands.append((line_num, command, args, kwargs))
-            except Exception as e:
-                raise DSLExecutionError(f"Parse error: {e}", line_num, line)
-        
-        return commands
-    
-    def _parse_line(self, line: str) -> Tuple[str, List[Any], Dict[str, Any]]:
-        """Parse a single DSL line."""
-        # Match function call pattern: command(args...)
-        match = re.match(r'^(\w+)\s*\((.*)\)\s*$', line)
-        if not match:
-            raise ValueError(f"Invalid syntax: {line}")
-        
-        command = match.group(1)
-        args_str = match.group(2).strip()
-        
-        if not args_str:
-            return command, [], {}
-        
-        # Parse arguments (simple implementation)
-        args, kwargs = self._parse_arguments(args_str)
-        return command, args, kwargs
-    
-    def _parse_arguments(self, args_str: str) -> Tuple[List[Any], Dict[str, Any]]:
-        """Parse function arguments."""
-        args = []
-        kwargs = {}
-        
-        # Split arguments (simple parsing - could be improved)
-        parts = []
-        current = ""
-        paren_level = 0
-        bracket_level = 0
-        in_string = False
-        string_char = None
-        
-        for char in args_str:
-            if not in_string and char in ['"', "'"]:
-                in_string = True
-                string_char = char
-            elif in_string and char == string_char:
-                in_string = False
-                string_char = None
-            elif not in_string:
-                if char == '(':
-                    paren_level += 1
-                elif char == ')':
-                    paren_level -= 1
-                elif char == '[':
-                    bracket_level += 1
-                elif char == ']':
-                    bracket_level -= 1
-                elif char == ',' and paren_level == 0 and bracket_level == 0:
-                    parts.append(current.strip())
-                    current = ""
-                    continue
-            
-            current += char
-        
-        if current.strip():
-            parts.append(current.strip())
-        
-        # Parse each part
-        for part in parts:
-            if '=' in part and not any(part.startswith(q) for q in ['"', "'", '[']):
-                # Keyword argument
-                key, value = part.split('=', 1)
-                kwargs[key.strip()] = self._parse_value(value.strip())
-            else:
-                # Positional argument
-                args.append(self._parse_value(part))
-        
-        return args, kwargs
-    
-    def _parse_value(self, value_str: str) -> Any:
-        """Parse a single value."""
-        value_str = value_str.strip()
-        
-        # String literals
-        if (value_str.startswith('"') and value_str.endswith('"')) or \
-           (value_str.startswith("'") and value_str.endswith("'")):
-            return value_str[1:-1]
-        
-        # List literals (simplified)
-        if value_str.startswith('[') and value_str.endswith(']'):
-            inner = value_str[1:-1].strip()
-            if not inner:
-                return []
-            
-            # Parse list of tuples for river points: [(5,5), (10,8)]
-            if '(' in inner:
-                items = []
-                parts = inner.split('),')
-                for part in parts:
-                    part = part.strip().rstrip(')')
-                    if part.startswith('('):
-                        part = part[1:]
-                    coords = [int(x.strip()) for x in part.split(',')]
-                    items.append(tuple(coords))
-                return items
-            else:
-                return [self._parse_value(item.strip()) for item in inner.split(',')]
-        
-        # Boolean literals
-        if value_str.lower() == 'true':
-            return True
-        elif value_str.lower() == 'false':
-            return False
-        
-        # Numeric literals
+    def parse_program(self, program_json: str) -> List[DSLCommand]:
+        """Parse JSON DSL program into validated command objects."""
         try:
-            if '.' in value_str:
-                return float(value_str)
-            else:
-                return int(value_str)
-        except ValueError:
-            pass
-        
-        # Bare identifiers (for entity types)
-        return value_str
+            # Parse JSON
+            program_data = json.loads(program_json)
+            
+            # Validate against Pydantic model
+            dsl_program = DSLProgram(**program_data)
+            
+            return dsl_program.commands
+            
+        except json.JSONDecodeError as e:
+            raise DSLExecutionError(f"Invalid JSON: {e}")
+        except ValidationError as e:
+            # Format Pydantic validation errors for better feedback
+            error_details = []
+            for error in e.errors():
+                location = " -> ".join(str(x) for x in error['loc'])
+                error_details.append(f"{location}: {error['msg']}")
+            raise DSLExecutionError(f"Validation errors:\n" + "\n".join(error_details))
 
 
 class DSLMapGenerator:
@@ -527,6 +513,9 @@ class DSLMapGenerator:
         self.verbose = verbose
         self.logger = logging.getLogger(__name__)
         self.parser = DSLParser()
+        
+        # Generate JSON Schema for LLM guidance
+        self.json_schema = DSLProgram.model_json_schema()
     
     def generate_maps(self, prompts: List[str]) -> Dict[str, Any]:
         """Generate maps for multiple prompts."""
@@ -583,49 +572,43 @@ class DSLMapGenerator:
         """Generate a map using DSL approach."""
         self.logger.info(f"Generating map {map_id} with DSL: {prompt}")
         
-        # System prompt for DSL generation
-        system_prompt = """You are a roguelike map generator that creates maps using a Domain Specific Language (DSL).
+        # System prompt for JSON DSL generation (simplified - avoid huge schema)
+        system_prompt = """You are a roguelike map generator that creates maps using JSON commands.
 
-DSL COMMANDS:
-- grid(width, height) - Initialize map (must be exactly 20, 15)
-- room(name, x, y, width, height) - Create rectangular room
-- corridor(x1, y1, x2, y2) - Connect two points with L-shaped corridor  
-- door(x, y) - Place door at coordinates
-- spawn(entity_type, x, y, **properties) - Place entity (player, ogre, goblin, shop, chest)
-- water_area(x, y, shape, radius=3, width=6, height=4) - Create water ("circle" or "rectangle")
-- river(points, width=2) - Create river through points: [(x1,y1), (x2,y2), ...]
-- checkpoint(name, verify_connectivity=False, verify_entities=False, full_verification=False, stats=False)
+RESPOND WITH JSON ONLY in this format:
+{"commands": [list_of_command_objects]}
 
-CHECKPOINTING STRATEGY:
-Use checkpoints strategically to debug and verify your work:
-- After placing basic structure: checkpoint("structure_done")
-- After ensuring connectivity: checkpoint("connected", verify_connectivity=True) 
-- After placing entities: checkpoint("entities_done", verify_entities=True)
-- Final check: checkpoint("complete", full_verification=True)
+COMMANDS:
+- {"type": "grid", "width": 20, "height": 15} - Initialize 20x15 map
+- {"type": "room", "name": "string", "x": int, "y": int, "width": int, "height": int} - Create room
+- {"type": "corridor", "x1": int, "y1": int, "x2": int, "y2": int} - L-shaped corridor
+- {"type": "door", "x": int, "y": int} - Place door
+- {"type": "spawn", "entity": "string", "x": int, "y": int} - Spawn entity
+- {"type": "water_area", "x": int, "y": int, "shape": "circle|rectangle", "radius": int} - Water
+- {"type": "river", "points": [[x,y], [x,y], ...], "width": int} - River path
+- {"type": "checkpoint", "name": "string", "verify_connectivity": false, "full_verification": false} - Checkpoint
 
-CRITICAL REQUIREMENTS:
-1. Every map MUST have exactly one player: spawn(player, x, y)
-2. All areas must be connected (use corridor/door commands)
-3. Grid must be exactly 20x15: grid(20, 15)
+ENTITY TYPES: player, ogre, goblin, shop, chest, tomb, spirit, human
 
-EXAMPLE PROGRAM:
-```
-grid(20, 15)
-room("main", 2, 2, 12, 8) 
-room("side", 15, 10, 4, 4)
-checkpoint("rooms_placed")
+CRITICAL RULES:
+1. MUST have exactly one "player" spawn
+2. Grid MUST be 20x15
+3. Connect areas with corridors/doors
+4. Use checkpoints: after rooms, after connectivity, final
 
-corridor(14, 6, 15, 6)
-corridor(15, 6, 17, 6)
-corridor(17, 6, 17, 10)
-checkpoint("connected", verify_connectivity=True)
+EXAMPLE:
+{
+  "commands": [
+    {"type": "grid", "width": 20, "height": 15},
+    {"type": "room", "name": "tavern", "x": 2, "y": 2, "width": 12, "height": 8},
+    {"type": "checkpoint", "name": "structure"},
+    {"type": "spawn", "entity": "player", "x": 8, "y": 6},
+    {"type": "spawn", "entity": "ogre", "x": 5, "y": 5},
+    {"type": "checkpoint", "name": "complete", "full_verification": true}
+  ]
+}
 
-spawn(player, 8, 6)
-spawn(ogre, 17, 12)
-checkpoint("complete", full_verification=True)
-```
-
-Generate a complete DSL program for the requested map. Use checkpoints wisely to verify your work without overusing tokens."""
+Generate valid JSON only."""
 
         user_prompt = f'Create a DSL program for: "{prompt}"'
         
@@ -648,31 +631,37 @@ Generate a complete DSL program for the requested map. Use checkpoints wisely to
                     print(f"Response: {program_text}")
                     print("=" * 60)
                 
-                # Extract DSL code from response (handle code blocks)
-                if "```" in program_text:
-                    # Find code block
-                    start = program_text.find("```")
+                # Clean up response - extract JSON from any markdown formatting
+                program_json = program_text.strip()
+                if "```" in program_json:
+                    # Find JSON code block
+                    start = program_json.find("```")
                     if start != -1:
-                        start = program_text.find("\n", start) + 1
-                        end = program_text.find("```", start)
+                        # Skip past the opening ```json or just ```
+                        start = program_json.find("\n", start)
+                        if start == -1:
+                            start = program_json.find("```") + 3
+                        else:
+                            start += 1
+                        end = program_json.find("```", start)
                         if end != -1:
-                            program_text = program_text[start:end].strip()
+                            program_json = program_json[start:end].strip()
                 
-                # Execute DSL program
+                # Execute JSON DSL program
                 builder = DSLMapBuilder()
-                execution_result = self._execute_dsl_program(program_text, builder)
+                execution_result = self._execute_dsl_program(program_json, builder)
                 
                 # Check if we need to retry based on execution result
                 if "❌" in execution_result:  # Error indicators in checkpoint output
-                    user_prompt = f"""The DSL program had issues:
+                    user_prompt = f"""The JSON DSL program had issues:
 
 {execution_result}
 
-Please fix the program and try again. Original request: "{prompt}"
+Please fix the JSON and try again. Original request: "{prompt}"
 
-Previous program:
-```
-{program_text}
+Previous JSON:
+```json
+{program_json}
 ```"""
                     
 
@@ -684,23 +673,27 @@ Previous program:
                 return builder.to_map_data(map_id, prompt)
                 
             except DSLExecutionError as e:
-                error_msg = f"DSL execution error at line {e.line_number}: {e}"
+                error_msg = f"JSON DSL execution error: {e}"
+                if e.command_index is not None:
+                    error_msg += f" (at command index {e.command_index})"
                 if e.command:
                     error_msg += f"\nCommand: {e.command}"
 
                 # Log the specific error for debugging
-                print(f"❌ DSL Error (Iteration {iteration + 1}): {error_msg}")
+                print(f"❌ JSON DSL Error (Iteration {iteration + 1}): {error_msg}")
 
-                user_prompt = f"""DSL execution failed:
+                user_prompt = f"""JSON DSL execution failed:
 
 {error_msg}
 
-Please fix the program. Original request: "{prompt}"
+Please fix the JSON. Original request: "{prompt}"
 
-Previous program:
+Previous JSON:
+```json
+{program_json}
 ```
-{program_text}
-```"""
+
+Remember to provide valid JSON that follows the schema exactly."""
                 iteration += 1
                 continue
 
@@ -716,32 +709,34 @@ Previous program:
         self.logger.warning(f"Map generation failed after {max_iterations} iterations, using fallback")
         print(f"⚠️  All {max_iterations} attempts failed, using minimal fallback map")
         builder = DSLMapBuilder()
-        fallback_program = """
-grid(20, 15)
-room("main", 2, 2, 16, 11)
-door(10, 2)
-spawn(player, 10, 7)
-checkpoint("fallback", full_verification=True)
-"""
-        self._execute_dsl_program(fallback_program, builder)
+        fallback_program_json = """{
+  "commands": [
+    {"type": "grid", "width": 20, "height": 15},
+    {"type": "room", "name": "main", "x": 2, "y": 2, "width": 16, "height": 11},
+    {"type": "door", "x": 10, "y": 2},
+    {"type": "spawn", "entity": "player", "x": 10, "y": 7},
+    {"type": "checkpoint", "name": "fallback", "full_verification": true}
+  ]
+}"""
+        self._execute_dsl_program(fallback_program_json, builder)
         return builder.to_map_data(map_id, prompt)
     
-    def _execute_dsl_program(self, program: str, builder: DSLMapBuilder) -> str:
-        """Execute a DSL program and return checkpoint output."""
-        commands = self.parser.parse_program(program)
+    def _execute_dsl_program(self, program_json: str, builder: DSLMapBuilder) -> str:
+        """Execute a JSON DSL program and return checkpoint output."""
+        commands = self.parser.parse_program(program_json)
         checkpoint_outputs = []
         
-        for line_num, command, args, kwargs in commands:
+        for command_index, command in enumerate(commands):
             try:
-                result = builder.execute_command(command, args, kwargs)
+                result = builder.execute_command(command)
                 
                 # Collect checkpoint outputs for feedback
-                if command == "checkpoint":
+                if isinstance(command, CheckpointCommand):
                     checkpoint_outputs.append(result)
                     
             except DSLExecutionError as e:
-                e.line_number = line_num
-                e.command = f"{command}({', '.join(map(str, args))}, {', '.join(f'{k}={v}' for k, v in kwargs.items())})"
+                e.command_index = command_index
+                e.command = f"{command.type}({command.model_dump()})"
                 raise e
         
         return "\n\n".join(checkpoint_outputs) if checkpoint_outputs else "Program executed successfully (no checkpoints)"
@@ -749,35 +744,37 @@ checkpoint("fallback", full_verification=True)
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Test the DSL parser
+    # Test the JSON DSL parser
     parser = DSLParser()
     
-    test_program = '''
-    grid(20, 15)
-    room("tavern", 2, 2, 10, 8)
-    room("kitchen", 12, 2, 6, 6)
-    checkpoint("rooms_placed", stats=True)
-    corridor(10, 5, 12, 5)
-    door(4, 9)
-    checkpoint("connected", verify_connectivity=True)
-    spawn(player, 6, 5)
-    spawn(ogre, 15, 4)
-    water_area(8, 12, "circle", radius=2)
-    river([(1, 10), (5, 12), (10, 14)], width=2)
-    checkpoint("complete", full_verification=True)
-    '''
+    test_program_json = '''{
+  "commands": [
+    {"type": "grid", "width": 20, "height": 15},
+    {"type": "room", "name": "tavern", "x": 2, "y": 2, "width": 10, "height": 8},
+    {"type": "room", "name": "kitchen", "x": 12, "y": 2, "width": 6, "height": 6},
+    {"type": "checkpoint", "name": "rooms_placed", "stats": true},
+    {"type": "corridor", "x1": 10, "y1": 5, "x2": 12, "y2": 5},
+    {"type": "door", "x": 4, "y": 9},
+    {"type": "checkpoint", "name": "connected", "verify_connectivity": true},
+    {"type": "spawn", "entity": "player", "x": 6, "y": 5},
+    {"type": "spawn", "entity": "ogre", "x": 15, "y": 4},
+    {"type": "water_area", "x": 8, "y": 12, "shape": "circle", "radius": 2},
+    {"type": "river", "points": [[1, 10], [5, 12], [10, 14]], "width": 2},
+    {"type": "checkpoint", "name": "complete", "full_verification": true}
+  ]
+}'''
     
     try:
-        commands = parser.parse_program(test_program)
+        commands = parser.parse_program(test_program_json)
         print("Parsed commands:")
-        for line_num, command, args, kwargs in commands:
-            print(f"Line {line_num}: {command}({args}, {kwargs})")
+        for i, command in enumerate(commands):
+            print(f"Command {i}: {command.type} - {command.model_dump()}")
         
         # Test execution
         builder = DSLMapBuilder()
-        for line_num, command, args, kwargs in commands:
-            result = builder.execute_command(command, args, kwargs)
-            if command == "checkpoint":
+        for command in commands:
+            result = builder.execute_command(command)
+            if isinstance(command, CheckpointCommand):
                 print(f"\n{result}\n")
     
     except Exception as e:

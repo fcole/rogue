@@ -14,7 +14,8 @@
       "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main verify --example)",
       "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --prompt \"a small room with two goblins\" --use-tools --visualize)",
       "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --help)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(PYTHONPATH=. .venv/bin/python -m src.cli.main generate --prompt \"a simple tavern with one goblin\" --use-dsl --visualize)"
     ],
     "deny": [],
     "ask": []

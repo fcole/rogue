@@ -10,88 +10,81 @@ import sys
 import json
 import time
 import argparse
-from src.generator.dsl_generator import DSLMapGenerator, DSLMapBuilder, DSLParser
+from src.generator.dsl_generator import DSLMapGenerator, DSLMapBuilder, DSLParser, CheckpointCommand
 
 def test_parser():
-    """Test the DSL parser with various commands."""
-    print("🔍 Testing DSL Parser...")
+    """Test the JSON DSL parser with various commands."""
+    print("🔍 Testing JSON DSL Parser...")
     
     parser = DSLParser()
     test_programs = [
         # Basic commands
-        'grid(20, 15)',
-        'room("tavern", 2, 2, 10, 8)',
-        'corridor(10, 5, 15, 8)',
-        'door(10, 5)',
-        'spawn(player, 8, 6)',
-        'spawn(ogre, 15, 4, hp=50, aggressive=true)',
+        '{"commands": [{"type": "grid", "width": 20, "height": 15}]}',
+        '{"commands": [{"type": "room", "name": "tavern", "x": 2, "y": 2, "width": 10, "height": 8}]}',
+        '{"commands": [{"type": "corridor", "x1": 10, "y1": 5, "x2": 15, "y2": 8}]}',
+        '{"commands": [{"type": "door", "x": 10, "y": 5}]}',
+        '{"commands": [{"type": "spawn", "entity": "player", "x": 8, "y": 6}]}',
+        '{"commands": [{"type": "spawn", "entity": "ogre", "x": 15, "y": 4, "properties": {"hp": 50, "aggressive": true}}]}',
         
         # Water features
-        'water_area(10, 8, "circle", radius=4)',
-        'river([(5, 5), (10, 8), (15, 12)], width=3)',
+        '{"commands": [{"type": "water_area", "x": 10, "y": 8, "shape": "circle", "radius": 4}]}',
+        '{"commands": [{"type": "river", "points": [[5, 5], [10, 8], [15, 12]], "width": 3}]}',
         
         # Checkpoints
-        'checkpoint("test")',
-        'checkpoint("connected", verify_connectivity=true, stats=true)',
-        'checkpoint("complete", full_verification=true)',
+        '{"commands": [{"type": "checkpoint", "name": "test"}]}',
+        '{"commands": [{"type": "checkpoint", "name": "connected", "verify_connectivity": true, "stats": true}]}',
+        '{"commands": [{"type": "checkpoint", "name": "complete", "full_verification": true}]}',
     ]
     
-    for program in test_programs:
+    for program_json in test_programs:
         try:
-            commands = parser.parse_program(program)
-            line_num, command, args, kwargs = commands[0]
-            print(f"✅ {program} -> {command}({args}, {kwargs})")
+            commands = parser.parse_program(program_json)
+            command = commands[0]
+            print(f"✅ {command.type} command -> {command.model_dump()}")
         except Exception as e:
-            print(f"❌ {program} -> Error: {e}")
+            print(f"❌ {program_json[:50]}... -> Error: {e}")
     
     print()
 
 def test_builder():
-    """Test the DSL map builder with a complete program."""
-    print("🏗️  Testing DSL Builder...")
+    """Test the JSON DSL map builder with a complete program."""
+    print("🏗️  Testing JSON DSL Builder...")
     
-    test_program = '''
-    # Create basic grid
-    grid(20, 15)
-    
-    # Create rooms
-    room("main_hall", 2, 2, 12, 8)
-    room("side_room", 15, 10, 4, 4)
-    checkpoint("rooms_created", stats=true)
-    
-    # Connect rooms
-    corridor(14, 6, 15, 6)
-    corridor(15, 6, 17, 6)  
-    corridor(17, 6, 17, 10)
-    door(17, 9)
-    checkpoint("connected", verify_connectivity=true)
-    
-    # Add water feature
-    water_area(8, 12, "circle", radius=2)
-    
-    # Spawn entities
-    spawn(player, 8, 6)
-    spawn(ogre, 17, 12)
-    spawn(chest, 5, 5)
-    checkpoint("complete", full_verification=true)
-    '''
+    test_program_json = '''{
+  "commands": [
+    {"type": "grid", "width": 20, "height": 15},
+    {"type": "room", "name": "main_hall", "x": 2, "y": 2, "width": 12, "height": 8},
+    {"type": "room", "name": "side_room", "x": 15, "y": 10, "width": 4, "height": 4},
+    {"type": "checkpoint", "name": "rooms_created", "stats": true},
+    {"type": "corridor", "x1": 14, "y1": 6, "x2": 15, "y2": 6},
+    {"type": "corridor", "x1": 15, "y1": 6, "x2": 17, "y2": 6},
+    {"type": "corridor", "x1": 17, "y1": 6, "x2": 17, "y2": 10},
+    {"type": "door", "x": 17, "y": 9},
+    {"type": "checkpoint", "name": "connected", "verify_connectivity": true},
+    {"type": "water_area", "x": 8, "y": 12, "shape": "circle", "radius": 2},
+    {"type": "spawn", "entity": "player", "x": 8, "y": 6},
+    {"type": "spawn", "entity": "ogre", "x": 17, "y": 12},
+    {"type": "spawn", "entity": "chest", "x": 5, "y": 5},
+    {"type": "checkpoint", "name": "complete", "full_verification": true}
+  ]
+}'''
     
     try:
         parser = DSLParser()
         builder = DSLMapBuilder()
         
-        commands = parser.parse_program(test_program)
+        commands = parser.parse_program(test_program_json)
         print(f"📝 Parsed {len(commands)} commands")
         
         checkpoint_count = 0
-        for line_num, command, args, kwargs in commands:
-            result = builder.execute_command(command, args, kwargs)
+        for i, command in enumerate(commands):
+            result = builder.execute_command(command)
             
-            if command == "checkpoint":
+            if isinstance(command, CheckpointCommand):
                 checkpoint_count += 1
                 print(f"\n{result}\n")
             else:
-                print(f"Line {line_num}: {result}")
+                print(f"Command {i}: {result}")
         
         print(f"🎯 Completed with {checkpoint_count} checkpoints")
         
@@ -114,27 +107,27 @@ def test_generator_mock():
     builder = DSLMapBuilder() 
     parser = DSLParser()
     
-    # Simulate what Claude might generate
-    mock_dsl_program = '''
-    grid(20, 15)
-    room("treasure_room", 5, 5, 8, 6)
-    checkpoint("room_placed")
-    
-    spawn(player, 9, 8)
-    spawn(chest, 7, 7)
-    spawn(ogre, 11, 7)
-    checkpoint("entities_placed", verify_entities=true)
-    
-    checkpoint("final", full_verification=true)
-    '''
+    # Simulate what Claude might generate (JSON format)
+    mock_dsl_program_json = '''{
+  "commands": [
+    {"type": "grid", "width": 20, "height": 15},
+    {"type": "room", "name": "treasure_room", "x": 5, "y": 5, "width": 8, "height": 6},
+    {"type": "checkpoint", "name": "room_placed"},
+    {"type": "spawn", "entity": "player", "x": 9, "y": 8},
+    {"type": "spawn", "entity": "chest", "x": 7, "y": 7},
+    {"type": "spawn", "entity": "ogre", "x": 11, "y": 7},
+    {"type": "checkpoint", "name": "entities_placed", "verify_entities": true},
+    {"type": "checkpoint", "name": "final", "full_verification": true}
+  ]
+}'''
     
     try:
-        commands = parser.parse_program(mock_dsl_program)
+        commands = parser.parse_program(mock_dsl_program_json)
         checkpoint_outputs = []
         
-        for line_num, command, args, kwargs in commands:
-            result = builder.execute_command(command, args, kwargs)
-            if command == "checkpoint":
+        for command in commands:
+            result = builder.execute_command(command)
+            if isinstance(command, CheckpointCommand):
                 checkpoint_outputs.append(result)
         
         print("Checkpoint outputs:")
