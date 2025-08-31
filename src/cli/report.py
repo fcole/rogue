@@ -173,6 +173,7 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                 <div class="summary-card">
                     <h3>Generation Success</h3>
                     <div class="value">{gen_data['summary']['successful']}/{gen_data['summary']['total_prompts']}</div>
+                    {f'<div style="font-size: 0.8em; margin-top: 5px;">{gen_data["summary"]["failed"]} failed</div>' if gen_data['summary']['failed'] > 0 else ''}
                 </div>
                 <div class="summary-card">
                     <h3>Verification Score</h3>
@@ -182,6 +183,11 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                     <h3>Avg Gen Time</h3>
                     <div class="value">{gen_data['summary']['average_time']:.1f}s</div>
                 </div>
+                {f'''<div class="summary-card" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                    <h3>Generation Failures</h3>
+                    <div class="value">{gen_data['summary']['failed']}</div>
+                    <div style="font-size: 0.8em; margin-top: 5px;">Used fallback maps</div>
+                </div>''' if gen_data['summary']['failed'] > 0 else ''}
             </div>
             
             <p style="text-align: center; color: #7f8c8d; margin-bottom: 30px;">
@@ -189,7 +195,10 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
             </p>
     """
     
-    # Process each map
+    # Collect failed results for summary
+    failed_results = [r for r in gen_data["results"] if r["status"] != "success"]
+
+    # Process each successful map
     for gen_result in gen_data["results"]:
         if gen_result["status"] != "success":
             continue
@@ -273,7 +282,47 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                 </div>
             </div>
         """
-    
+
+    # Add failure summary if any failures occurred
+    if failed_results:
+        html_content += f"""
+            <div class="failures-section" style="margin-top: 40px; border-top: 2px solid #e74c3c; padding-top: 30px;">
+                <h2 style="color: #e74c3c; text-align: center; margin-bottom: 30px;">❌ Generation Failures</h2>
+                <div style="background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #721c24; margin-top: 0;">Failed Generations Summary</h3>
+                    <p style="margin-bottom: 15px;"><strong>Total Failed:</strong> {len(failed_results)} out of {gen_data['summary']['total_prompts']} attempts</p>
+                    <p style="margin-bottom: 20px; color: #721c24;"><em>These maps fell back to minimal valid maps due to generation errors.</em></p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+        """
+
+        for failed_result in failed_results:
+            error_msg = failed_result.get("error_message", "Unknown error")
+            # Truncate very long error messages for display
+            if len(error_msg) > 200:
+                error_msg = error_msg[:200] + "..."
+
+            html_content += f"""
+                    <div style="background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; padding: 20px;">
+                        <h4 style="color: #c53030; margin-top: 0; margin-bottom: 10px;">
+                            Map {failed_result['prompt_index']}: Failed Generation
+                        </h4>
+                        <div style="background: #fed7d7; padding: 10px; border-radius: 4px; margin-bottom: 10px;">
+                            <strong>Error:</strong> {error_msg}
+                        </div>
+                        <div style="color: #744210;">
+                            <strong>Generation Time:</strong> {failed_result.get('generation_time', 0):.2f} seconds<br>
+                            <strong>Status:</strong> {failed_result.get('status', 'unknown')}
+                        </div>
+                    </div>
+            """
+
+        html_content += """
+                </div>
+            </div>
+        """
+
     html_content += """
         </div>
     </body>

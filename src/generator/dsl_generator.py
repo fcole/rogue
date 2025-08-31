@@ -687,7 +687,10 @@ Previous program:
                 error_msg = f"DSL execution error at line {e.line_number}: {e}"
                 if e.command:
                     error_msg += f"\nCommand: {e.command}"
-                
+
+                # Log the specific error for debugging
+                print(f"❌ DSL Error (Iteration {iteration + 1}): {error_msg}")
+
                 user_prompt = f"""DSL execution failed:
 
 {error_msg}
@@ -700,14 +703,18 @@ Previous program:
 ```"""
                 iteration += 1
                 continue
-                
+
             except Exception as e:
-                self.logger.error(f"Unexpected error generating map {map_id}: {e}")
+                error_msg = f"Unexpected error generating map {map_id}: {e}"
+                self.logger.error(error_msg)
+                # Also print to console for visibility
+                print(f"❌ Unexpected Error (Iteration {iteration + 1}): {e}")
                 iteration += 1
                 continue
         
         # Fallback - create minimal valid map
         self.logger.warning(f"Map generation failed after {max_iterations} iterations, using fallback")
+        print(f"⚠️  All {max_iterations} attempts failed, using minimal fallback map")
         builder = DSLMapBuilder()
         fallback_program = """
 grid(20, 15)

@@ -172,6 +172,14 @@ def generate(prompts, prompt, output, example, visualize, use_ollama_tools, use_
     console.print(f"Successful: {summary['successful']}")
     console.print(f"Failed: {summary['failed']}")
     console.print(f"Average time: {summary['average_time']:.2f}s")
+
+    # Show error details for failed generations
+    failed_results = [r for r in results["results"] if r.get("error_message")]
+    if failed_results:
+        console.print(f"\n[red]Error Details:[/red]")
+        for result in failed_results:
+            console.print(f"  • Map {result['prompt_index']}: {result['error_message'][:100]}{'...' if len(result['error_message']) > 100 else ''}")
+
     console.print(f"Results saved to: {results_file}")
 
 

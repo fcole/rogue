@@ -241,7 +241,11 @@ if __name__ == "__main__":
             
             print(f"⏱️  Generation took {elapsed:.2f}s")
             print(f"📈 Results: {results['summary']}")
-            
+
+            # Show error details if generation failed
+            if results['results'] and results['results'][0].error_message:
+                print(f"❌ Generation failed: {results['results'][0].error_message}")
+
             if results['results'] and results['results'][0].map_data:
                 map_data = results['results'][0].map_data
                 print(f"🗺️  Generated map: {map_data.width}x{map_data.height}")
