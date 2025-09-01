@@ -150,8 +150,10 @@ class MapVerifier:
                     check.get("critical", False) and not check.get("passed", True)
                     for check in quantitative_details.get("entity_counts", {}).values()
                 )
+                # Also treat entity overlaps as critical failures
+                overlap_failed = not quantitative_details.get("entity_placement", {}).get("entity_overlap", {}).get("passed", True)
                 
-                if critical_entity_failures:
+                if critical_entity_failures or overlap_failed:
                     overall_score = 0.0
                     passed = False
                 else:

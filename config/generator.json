@@ -7,7 +7,9 @@
   },
   "ollama": {
     "endpoint": "http://localhost:11434",
-    "model": "gpt-oss:latest",
+    "model": "qwen3-coder:30b",
+    "dsl_model": "qwen3-coder:30b",
+    "tool_model": "gpt-oss:latest",
     "temperature": 0.2
   },
   "anthropic": {

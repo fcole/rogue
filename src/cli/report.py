@@ -361,6 +361,25 @@ def _generate_verification_details(ver_result: Dict[str, Any]) -> str:
             html += f'<li>{status} {entity_type}: expected {check.get("expected", "?")} got {check.get("actual", "?")}</li>'
         html += '</ul></div>'
 
+    # Entity overlap (critical placement issue)
+    try:
+        ep = quant_checks.get("entity_placement", {})
+        overlap = ep.get("entity_overlap", {})
+        if overlap and not overlap.get("passed", True):
+            msg = overlap.get("message", "Entities overlap on the same tile.")
+            html += (
+                '<div style="margin-top: 10px; padding: 10px; background: #fdecea; border-left: 4px solid #e74c3c;">'
+                '<strong>⚠️ Entity Overlap Detected</strong>'
+                f'<div style="margin-top: 6px;">{msg}</div>'
+                '<div style="margin-top: 6px; color: #555; font-size: 0.95em;">'
+                'Overlapping entities can make the map unplayable or confusing. '
+                'Ensure each entity is placed on a distinct floor/door tile (use small dx/dy offsets when spawning in regions).'
+                '</div>'
+                '</div>'
+            )
+    except Exception:
+        pass
+
     # Unknown entities surfaced by verifier
     if "unknown_entities" in quant_checks and quant_checks["unknown_entities"].get("count", 0) > 0:
         ue = quant_checks["unknown_entities"]

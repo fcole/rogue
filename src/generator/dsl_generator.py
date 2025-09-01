@@ -304,9 +304,29 @@ class DSLMapBuilder:
         a_coords = self._get_room_wall_coords(a, a_wall)
         b_coords = self._get_room_wall_coords(b, b_wall)
         if not a_coords or not b_coords:
-            raise DSLExecutionError("Could not find walls to connect")
-        ax, ay = a_coords[max(1, (len(a_coords)-1)//2)]
-        bx, by = b_coords[max(1, (len(b_coords)-1)//2)]
+            a_len = len(a_coords)
+            b_len = len(b_coords)
+            raise DSLExecutionError(
+                f"Could not find walls to connect: {a}.{a_wall} length {a_len}, {b}.{b_wall} length {b_len}. "
+                f"Choose a different wall side with length >= 1 or increase room size."
+            )
+
+        # Choose a safe index on each wall. Prefer a non-corner center when possible; otherwise clamp in-bounds.
+        def pick_idx(coords: List[Tuple[int, int]]) -> int:
+            n = len(coords)
+            if n <= 1:
+                return 0
+            # tentative center
+            idx = (n - 1) // 2
+            # prefer non-corner when available
+            if n >= 3:
+                idx = max(1, min(idx, n - 2))
+            else:
+                idx = min(idx, n - 1)
+            return idx
+
+        ax, ay = a_coords[pick_idx(a_coords)]
+        bx, by = b_coords[pick_idx(b_coords)]
         self.grid[ay][ax] = '+'
         self.grid[by][bx] = '+'
         def outside(x, y, wall_side):
@@ -649,11 +669,15 @@ class DSLMapGenerator:
                                              model=self.config.get("anthropic", {}).get("model", "claude-3-5-sonnet-20241022"),
                                              temperature=self.config.get("anthropic", {}).get("temperature", 0.7))
             else:
-                # Default to Ollama
-                self.client = LLMClient.create("ollama",
-                                             model=self.config.get("ollama", {}).get("model", "deepseek-coder:33b-instruct"),
-                                             endpoint=self.config.get("ollama", {}).get("endpoint", "http://localhost:11434"),
-                                             temperature=self.config.get("ollama", {}).get("temperature", 0.2))
+                # Default to Ollama (prefer DSL-specific model if provided)
+                ollama_cfg = self.config.get("ollama", {})
+                model = ollama_cfg.get("dsl_model") or ollama_cfg.get("model", "qwen3-coder:30b")
+                self.client = LLMClient.create(
+                    "ollama",
+                    model=model,
+                    endpoint=ollama_cfg.get("endpoint", "http://localhost:11434"),
+                    temperature=ollama_cfg.get("temperature", 0.2),
+                )
         except Exception as e:
             raise RuntimeError(f"Failed to create LLM client for provider '{provider}': {e}")
         
@@ -742,6 +766,10 @@ CRITICAL RULES:
 4. Use checkpoints: after structure, after connectivity (verify_connectivity=true), final (full_verification=true)
 5. Bounds (0-indexed): x in [0,19], y in [0,14]; rooms must fit: x+width<=20, y+height<=15
 6. door_on offset hint: do not use 0; valid offsets are 1..(wall_length-2). Prefer at:"center" when unsure.
+7. Entities must not overlap; ensure each entity is on a distinct tile (use at:"center" with small dx/dy for variety).
+8. Minimum room size for door_on: rooms should be at least 3x3 so each wall has a non-corner tile; if a wall is too short, either choose a different wall or increase room size.
+9. connect_by_walls places doors automatically on both walls; do not also add a separate door_on for the same connection.
+10. Do not model 1-tile-thick corridors as rooms needing door_on; use connect_by_walls to create connections.
 
 EXAMPLE:
 {
@@ -766,6 +794,10 @@ Generate valid JSON only."""
         # Honor configured retry count
         max_iterations = int(self.config.get("llm", {}).get("max_retries", 3))
         iteration = 0
+        # Track last successfully executed (but possibly constraint-violating) program
+        last_successful_builder: Optional[DSLMapBuilder] = None
+        last_successful_program_json: Optional[str] = None
+        last_checkpoint_output: Optional[str] = None
         
         while iteration < max_iterations:
             try:
@@ -802,6 +834,10 @@ Generate valid JSON only."""
                 # Execute JSON DSL program
                 builder = DSLMapBuilder()
                 execution_result = self._execute_dsl_program(program_json, builder)
+                # Remember the last successfully executed program regardless of checkpoint issues
+                last_successful_builder = builder
+                last_successful_program_json = program_json
+                last_checkpoint_output = execution_result
                 
                 # If checkpoints indicated issues, or no checkpoints provided, trigger a surgical retry
                 issues_detected = "❌" in execution_result
@@ -817,6 +853,8 @@ Constraints (restate precisely):
 - Rooms must fit entirely: x + width <= 20, y + height <= 15.
 - Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
 - Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
+ - For doors, use door_on(room, wall, at/offset) or connect_by_walls only. Do not add door_on if connect_by_walls already connects those rooms.
+ - Rooms for door_on should be at least 3x3 so walls have non-corner tiles; if a wall is too short, pick a different wall or increase the room size.
 
 Return JSON only.
 
@@ -851,6 +889,8 @@ Constraints (restate precisely):
 - Use door_on(room, wall, at/offset) or connect_by_walls only for doors/corridors.
 - Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
 - Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
+ - Do not add door_on when connect_by_walls already places doors; avoid redundant door placements.
+ - Ensure rooms used with door_on are at least 3x3; if a wall is too short, increase room size or choose a different wall.
 
 Return JSON only. Original request: "{prompt}"
 
@@ -869,7 +909,12 @@ Previous JSON:
                 iteration += 1
                 continue
         
-        # Fallback - create minimal valid map
+        # If we executed at least one program but constraints weren't satisfied, return the last map as-is
+        if last_successful_builder is not None:
+            print(f"⚠️  Proceeding with last generated map despite constraint issues after {max_iterations} attempts")
+            return last_successful_builder.to_map_data(map_id, prompt)
+
+        # Fallback - create minimal valid map (only when DSL could not be executed at all)
         self.logger.warning(f"Map generation failed after {max_iterations} iterations, using fallback")
         print(f"⚠️  All {max_iterations} attempts failed, using minimal fallback map")
         builder = DSLMapBuilder()

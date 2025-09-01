@@ -302,6 +302,9 @@ def verify(maps, prompts, results, output, example, ollama_endpoint):
         
         if not result.quantitative_checks.get("connectivity", {}).get("passed", True):
             issues.append("connectivity")
+        # Flag entity overlap if detected
+        if not result.quantitative_checks.get("entity_placement", {}).get("entity_overlap", {}).get("passed", True):
+            issues.append("entity_overlap")
         # Flag unknown entities if any
         if result.quantitative_checks.get("unknown_entities", {}).get("count", 0) > 0:
             issues.append("unknown_entities")

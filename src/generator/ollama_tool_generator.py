@@ -405,11 +405,12 @@ class OllamaToolBasedGenerator:
         self.logger = logging.getLogger(__name__)
         
         # Ollama configuration
-        cfg_endpoint = self.config.get("ollama", {}).get("endpoint", "http://localhost:11434")
-        cfg_model = self.config.get("ollama", {}).get("model", "deepseek-coder:33b-instruct")
+        ollama_cfg = self.config.get("ollama", {})
+        cfg_endpoint = ollama_cfg.get("endpoint", "http://localhost:11434")
+        cfg_model = ollama_cfg.get("tool_model") or ollama_cfg.get("model", "gpt-oss:latest")
         self.ollama_endpoint = os.getenv("OLLAMA_ENDPOINT", cfg_endpoint)
         self.model = os.getenv("OLLAMA_MODEL", cfg_model)
-        self.temperature = self.config.get("ollama", {}).get("temperature", 0.3)
+        self.temperature = ollama_cfg.get("temperature", 0.3)
         
         # Tool definitions in Ollama function-calling format (OpenAI-compatible)
         base_tools = [
