@@ -88,6 +88,8 @@ class DoorOnCommand(BaseCommand):
     wall: Literal["north", "south", "east", "west"] = Field(description="Wall side")
     at: Optional[Literal["center", "start", "end"]] = Field(default="center", description="Position selector on wall")
     offset: Optional[int] = Field(default=None, ge=0, description="Offset from wall start (excludes corners)")
+    snap_to_valid: bool = Field(default=False, description="If true, clamp/snap to a valid position; may use corners for very short walls")
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ConnectByWallsCommand(BaseCommand):
@@ -206,7 +208,7 @@ class DSLMapBuilder:
         elif isinstance(command, RoomCommand):
             return self._cmd_room(command.name, command.x, command.y, command.width, command.height)
         elif isinstance(command, DoorOnCommand):
-            return self._cmd_door_on(command.room, command.wall, command.at, command.offset)
+            return self._cmd_door_on(command.room, command.wall, command.at, command.offset, command.snap_to_valid)
         elif isinstance(command, ConnectByWallsCommand):
             return self._cmd_connect_by_walls(command.a, command.a_wall, command.b, command.b_wall, command.style)
         elif isinstance(command, SpawnInCommand):
@@ -271,29 +273,39 @@ class DSLMapBuilder:
         
         return f"Created room '{name}' at ({x},{y}) size {width}x{height}"
     
-    def _cmd_door_on(self, room: str, wall: str, at: Optional[str], offset: Optional[int]) -> str:
+    def _cmd_door_on(self, room: str, wall: str, at: Optional[str], offset: Optional[int], snap_to_valid: bool = False) -> str:
         if not self.grid:
             raise DSLExecutionError("Must create grid first")
         coords = self._get_room_wall_coords(room, wall)
         if not coords:
             raise DSLExecutionError(f"Room '{room}' or wall '{wall}' not found")
         valid = coords[1:-1] if len(coords) > 2 else []
-        if not valid:
+        if not valid and not snap_to_valid:
             raise DSLExecutionError(f"Wall too short for door on {room}.{wall}")
         if offset is not None:
-            if offset <= 0 or offset >= len(coords)-1:
-                raise DSLExecutionError(f"Invalid offset {offset} for {room}.{wall}; valid 1..{len(coords)-2}")
-            idx = offset
+            if 0 < offset < len(coords)-1:
+                idx = offset
+            else:
+                if snap_to_valid:
+                    if len(coords) > 2:
+                        idx = min(max(1, offset), len(coords)-2)
+                    else:
+                        # Fall back to a corner if only corners exist
+                        idx = 0 if offset is None or offset <= 0 else len(coords)-1
+                else:
+                    raise DSLExecutionError(f"Invalid offset {offset} for {room}.{wall}; valid 1..{len(coords)-2}")
         elif at == "start":
             idx = 1
         elif at == "end":
-            idx = len(coords)-2
+            idx = len(coords)-2 if len(coords) > 2 else (len(coords)-1 if snap_to_valid else None)
         else:
-            idx = (len(coords)-1)//2
-            if idx == 0:
-                idx = 1
-            if idx >= len(coords)-1:
-                idx = len(coords)-2
+            if len(coords) > 2:
+                idx = max(1, min((len(coords)-1)//2, len(coords)-2))
+            else:
+                if snap_to_valid:
+                    idx = 0 if len(coords) == 1 else 1
+                else:
+                    raise DSLExecutionError(f"Wall too short for door on {room}.{wall}")
         x, y = coords[idx]
         self.grid[y][x] = '+'
         return f"Placed door_on {room}.{wall} at ({x},{y})"
@@ -751,6 +763,7 @@ COMMANDS:
 - {"type": "grid", "width": 20, "height": 15} - Initialize 20x15 map
 - {"type": "room", "name": "string", "x": int, "y": int, "width": int, "height": int} - Create room (labels tiles: room:<name>, wall:<side>, interior)
 - {"type": "door_on", "room": "name", "wall": "north|south|east|west", "at": "center|start|end", "offset": int} - Place a door on a room wall (no raw coordinates)
+ - {"type": "door_on", "room": "name", "wall": "north|south|east|west", "at": "center|start|end", "offset": int, "snap_to_valid": false} - Place a door on a room wall (set snap_to_valid=true to clamp to nearest valid position; may use corners if wall is very short)
 - {"type": "connect_by_walls", "a": "roomA", "a_wall": "east", "b": "roomB", "b_wall": "west", "style": "L|I"} - Place doors on both walls and carve corridor
 - {"type": "spawn", "entity": "string", "in": "room", "at": "center", "dx": 0, "dy": 0} - Spawn in a room region
 - {"type": "water_area", "x": int, "y": int, "shape": "circle|rectangle", "radius": int} - Water (optional)
@@ -788,6 +801,17 @@ EXAMPLE:
 }
 
 Generate valid JSON only."""
+
+        # Additional guidance for Ollama models (only) to improve adherence
+        if self.provider == "ollama":
+            system_prompt += """
+
+Ollama-specific guidance:
+- Prefer at:"center" for door_on unless the wall is long; only use numeric offset within 1..(wall_length-2).
+- Do NOT overlap rooms; preserve at least a 1-tile gap unless connecting via connect_by_walls. Overlap erases wall labels and shortens walls.
+- If connect_by_walls reports a wall length 0, switch to another wall with length ≥ 3 or enlarge the room slightly.
+- The 'commands' array must contain only JSON objects with a 'type' field — no nulls, empty objects, or comments.
+"""
 
         user_prompt = f'Create a DSL program for: "{prompt}"'
         
@@ -833,6 +857,18 @@ Generate valid JSON only."""
                 
                 # Execute JSON DSL program
                 builder = DSLMapBuilder()
+                # Pre-filter junk commands for Ollama: drop entries without a 'type'
+                if self.provider == "ollama":
+                    try:
+                        data = json.loads(program_json)
+                        cmds = data.get("commands") if isinstance(data, dict) else None
+                        if isinstance(cmds, list):
+                            filtered = [c for c in cmds if isinstance(c, dict) and c.get("type")]
+                            if len(filtered) != len(cmds):
+                                data["commands"] = filtered
+                                program_json = json.dumps(data)
+                    except Exception:
+                        pass
                 execution_result = self._execute_dsl_program(program_json, builder)
                 # Remember the last successfully executed program regardless of checkpoint issues
                 last_successful_builder = builder
@@ -853,8 +889,9 @@ Constraints (restate precisely):
 - Rooms must fit entirely: x + width <= 20, y + height <= 15.
 - Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
 - Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
- - For doors, use door_on(room, wall, at/offset) or connect_by_walls only. Do not add door_on if connect_by_walls already connects those rooms.
- - Rooms for door_on should be at least 3x3 so walls have non-corner tiles; if a wall is too short, pick a different wall or increase the room size.
+- For doors, use door_on(room, wall, at/offset) or connect_by_walls only. Do not add door_on if connect_by_walls already connects those rooms.
+- Rooms for door_on should be at least 3x3 so walls have non-corner tiles; if a wall is too short, pick a different wall or increase the room size.
+{('\n- Prefer at:\"center\" for door_on; only use numeric offset within 1..(wall_length-2).\n- Do NOT overlap rooms; preserve at least a 1-tile gap unless connecting via connect_by_walls.\n- Ensure commands contain only objects with a type; remove any null/empty entries.' if self.provider == 'ollama' else '')}
 
 Return JSON only.
 
@@ -889,8 +926,9 @@ Constraints (restate precisely):
 - Use door_on(room, wall, at/offset) or connect_by_walls only for doors/corridors.
 - Include both checkpoints: one with verify_connectivity=true and the final with full_verification=true.
 - Make the minimal change necessary: only adjust offending command(s); keep all other commands identical.
- - Do not add door_on when connect_by_walls already places doors; avoid redundant door placements.
- - Ensure rooms used with door_on are at least 3x3; if a wall is too short, increase room size or choose a different wall.
+- Do not add door_on when connect_by_walls already places doors; avoid redundant door placements.
+- Ensure rooms used with door_on are at least 3x3; if a wall is too short, increase room size or choose a different wall.
+{('\n- Prefer at:\"center\" for door_on unless the wall is long; only use numeric offset within 1..(wall_length-2).\n- Do NOT overlap rooms; preserve a 1-tile gap unless connecting via connect_by_walls.\n- Remove any null/empty items from the commands list; each entry must be an object with a type.' if self.provider == 'ollama' else '')}
 
 Return JSON only. Original request: "{prompt}"
 
