@@ -666,14 +666,25 @@ class DSLMapGenerator:
                 if not api_key:
                     raise RuntimeError("Missing Anthropic API key in config/secrets.json")
                 self.client = LLMClient.create("anthropic", 
+                                             json_mode=True,
                                              model=self.config.get("anthropic", {}).get("model", "claude-3-5-sonnet-20241022"),
                                              temperature=self.config.get("anthropic", {}).get("temperature", 0.7))
+            elif provider == "gemini":
+                # For Gemini, we need the API key
+                api_key = self.secrets.get("gemini_api_key")
+                if not api_key:
+                    raise RuntimeError("Missing Gemini API key in config/secrets.json")
+                self.client = LLMClient.create("gemini", 
+                                             json_mode=True,
+                                             model=self.config.get("gemini", {}).get("model", "gemini-1.5-flash"),
+                                             temperature=self.config.get("gemini", {}).get("temperature", 0.8))
             else:
                 # Default to Ollama (prefer DSL-specific model if provided)
                 ollama_cfg = self.config.get("ollama", {})
                 model = ollama_cfg.get("dsl_model") or ollama_cfg.get("model", "qwen3-coder:30b")
                 self.client = LLMClient.create(
                     "ollama",
+                    json_mode=True,
                     model=model,
                     endpoint=ollama_cfg.get("endpoint", "http://localhost:11434"),
                     temperature=ollama_cfg.get("temperature", 0.2),

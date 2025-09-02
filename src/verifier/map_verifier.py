@@ -19,10 +19,17 @@ class MapVerifier:
     
     It never trusts any metadata flags from the generator, ensuring true verification.
     """
-    def __init__(self, config_file: str = "verifier.json"):
+    def __init__(self, config_file: str = "verifier.json", provider: str = None):
         self.config = load_config(config_file)
-        llm_config = self.config["llm"].copy()
-        provider = llm_config.pop("provider")
+        
+        # Determine the provider
+        if provider is None:
+            provider = self.config.get("llm", {}).get("provider", "ollama")
+        
+        # Get the config for the specified provider
+        llm_config = self.config.get(provider, {})
+        
+        # Create the LLM client
         self.llm = LLMClient.create(provider, **llm_config)
 
     def verify_maps(self, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:

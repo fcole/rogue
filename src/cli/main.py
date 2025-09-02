@@ -35,8 +35,9 @@ def main():
 @click.option("--use-smart-positioning", is_flag=True, help="Use smart positioning generator (easier for LLMs)")
 @click.option("--use-dsl", is_flag=True, help="Use DSL-based generator (structured commands, efficient)")
 @click.option("--use-claude-dsl", is_flag=True, help="Use DSL-based generator with Claude (Anthropic)")
+@click.option("--use-gemini-dsl", is_flag=True, help="Use DSL-based generator with Gemini (Google)")
 @click.option("--ollama-endpoint", type=str, help="Override Ollama endpoint, e.g., http://host.docker.internal:11434")
-def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_tools, use_tools, use_smart_positioning, use_dsl, use_claude_dsl, ollama_endpoint):
+def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_tools, use_tools, use_smart_positioning, use_dsl, use_claude_dsl, use_gemini_dsl, ollama_endpoint):
     """Generate roguelike maps from text prompts."""
     
     # Determine prompts to use
@@ -81,6 +82,10 @@ def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_to
             from ..generator.dsl_generator import DSLMapGenerator
             generator_type = "DSL-based (Claude)"
             generator = DSLMapGenerator(provider="anthropic", verbose=verbose)
+        elif use_gemini_dsl:
+            from ..generator.dsl_generator import DSLMapGenerator
+            generator_type = "DSL-based (Gemini)"
+            generator = DSLMapGenerator(provider="gemini", verbose=verbose)
         elif use_ollama_tools:
             from ..generator.ollama_tool_generator import OllamaToolBasedGenerator
             generator_type = "Ollama tool-based"
@@ -196,7 +201,8 @@ def generate(prompts, prompt, output, example, visualize, verbose, use_ollama_to
 @click.option("--output", "-o", type=click.Path(), default="data/verification", help="Output directory")
 @click.option("--example", is_flag=True, help="Verify example maps (must run generate --example first)")
 @click.option("--ollama-endpoint", type=str, help="Override Ollama endpoint for verifier LLM")
-def verify(maps, prompts, results, output, example, ollama_endpoint):
+@click.option("--verifier-provider", type=click.Choice(["ollama", "anthropic", "gemini"]), help="Override LLM provider for verifier.")
+def verify(maps, prompts, results, output, example, ollama_endpoint, verifier_provider):
     """Verify that generated maps match their prompts."""
     
     test_cases = []
@@ -251,7 +257,7 @@ def verify(maps, prompts, results, output, example, ollama_endpoint):
     console.print(f"[green]Verifying {len(test_cases)} maps...[/green]")
     
     # Create verifier and verify maps
-    verifier = MapVerifier()
+    verifier = MapVerifier(provider=verifier_provider)
     
     with Progress(
         SpinnerColumn(),
