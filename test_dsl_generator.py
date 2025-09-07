@@ -211,11 +211,12 @@ def main():
     print("  python test_dsl_generator.py --real-api                    # Use Ollama (default)")
     print("  python test_dsl_generator.py --real-api --provider ollama  # Use Ollama explicitly")
     print("  python test_dsl_generator.py --real-api --provider anthropic  # Use Anthropic")
+    print("  python test_dsl_generator.py --real-api --provider gemini     # Use Gemini")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test DSL Map Generator")
     parser.add_argument("--real-api", action="store_true", help="Run tests with real API calls (Ollama or Anthropic)")
-    parser.add_argument("--provider", choices=["ollama", "anthropic"], default="ollama", 
+    parser.add_argument("--provider", choices=["ollama", "anthropic", "gemini"], default="ollama", 
                        help="Choose LLM provider (default: ollama)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed LLM conversation")
     args = parser.parse_args()

@@ -51,9 +51,15 @@ def main():
     # Generator selection
     parser.add_argument(
         "--generator",
-        choices=["default", "ollama", "claude", "smart", "dsl", "claude-dsl"],
+        choices=["default", "ollama", "claude", "smart", "dsl", "claude-dsl", "gemini-dsl"],
         default="dsl",
-        help="Choose generator: default (config), ollama (Ollama tool-based), claude (Anthropic tool-based), smart (smart positioning), dsl (DSL-based), claude-dsl (DSL with Claude)",
+        help="Choose generator: default (config), ollama (Ollama tool-based), claude (Anthropic tool-based), smart (smart positioning), dsl (DSL-based), claude-dsl (DSL with Claude), gemini-dsl (DSL with Gemini)",
+    )
+    parser.add_argument(
+        "--verifier",
+        choices=["default", "ollama", "anthropic", "gemini"],
+        default="default",
+        help="Choose verifier LLM provider.",
     )
     parser.add_argument(
         "--ollama-endpoint",
@@ -106,6 +112,8 @@ def main():
             gen_flags.append("--use-dsl")
         elif args.generator == "claude-dsl":
             gen_flags.append("--use-claude-dsl")
+        elif args.generator == "gemini-dsl":
+            gen_flags.append("--use-gemini-dsl")
         if args.ollama_endpoint:
             gen_flags += ["--ollama-endpoint", args.ollama_endpoint]
 
@@ -117,6 +125,8 @@ def main():
         ver_flags = ["verify", "--example"]
         if args.ollama_endpoint:
             ver_flags += ["--ollama-endpoint", args.ollama_endpoint]
+        if args.verifier != "default":
+            ver_flags += ["--verifier-provider", args.verifier]
         if run_command(" ".join(ver_flags), "Verifying generated maps") != 0:
             sys.exit(1)
     
