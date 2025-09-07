@@ -5,6 +5,67 @@ from datetime import datetime
 from typing import Dict, Any, List
 from ..shared.models import MapData
 from ..shared.utils import visualize_map
+import xml.etree.ElementTree as ET
+import re
+
+try:
+    # Optional dependency for TMX rendering
+    from PIL import Image  # type: ignore
+except Exception:
+    Image = None  # type: ignore
+
+
+def _parse_csv_layer(layer: ET.Element, width: int, height: int):
+    data = layer.find("data")
+    assert data is not None and data.get("encoding") == "csv"
+    raw = re.split(r"[\s,]+", data.text.strip())
+    nums = [int(x) for x in raw if x]
+    assert len(nums) == width * height
+    return [nums[i*width:(i+1)*width] for i in range(height)]
+
+
+def _render_tmx_to_png(tmx_path: Path, out_png: Path) -> bool:
+    """Render a TMX file to PNG. Returns True on success.
+
+    Keeps implementation minimal and aligned with our exporter: one image tileset,
+    CSV layers, no flips. If Pillow is unavailable, returns False.
+    """
+    if Image is None:
+        return False
+    try:
+        root = ET.parse(tmx_path).getroot()
+        w = int(root.get("width")); h = int(root.get("height"))
+        tw = int(root.get("tilewidth")); th = int(root.get("tileheight"))
+        ts = root.find("tileset")
+        if ts is None:
+            return False
+        firstgid = int(ts.get("firstgid"))
+        cols = int(ts.get("columns"))
+        img_el = ts.find("image")
+        if img_el is None:
+            return False
+        sheet_path = (tmx_path.parent / img_el.get("source")).resolve()
+        sheet = Image.open(sheet_path).convert("RGBA")
+        canvas = Image.new("RGBA", (w * tw, h * th), (0, 0, 0, 0))
+        for layer in root.findall("layer"):
+            grid = _parse_csv_layer(layer, w, h)
+            for yy in range(h):
+                for xx in range(w):
+                    gid = grid[yy][xx]
+                    if gid <= 0:
+                        continue
+                    local = gid - firstgid
+                    if local < 0:
+                        continue
+                    sx = (local % cols) * tw
+                    sy = (local // cols) * th
+                    tile = sheet.crop((sx, sy, sx + tw, sy + th))
+                    canvas.alpha_composite(tile, (xx * tw, yy * th))
+        out_png.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(out_png)
+        return True
+    except Exception:
+        return False
 
 
 def generate_html_report(generation_file: Path, verification_file: Path, output_file: Path):
@@ -217,6 +278,16 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
         # Generate map visualization
         visual = visualize_map(map_data)
 
+        # Ensure rendered PNG exists for this map if TMX is present
+        rendered_rel = Path("renders") / f"{map_data.id}.png"
+        rendered_abs = Path("data") / rendered_rel
+        tmx_path = Path("data/tmx") / f"{map_data.id}.tmx"
+        if tmx_path.exists():
+            need = (not rendered_abs.exists()) or (tmx_path.stat().st_mtime > rendered_abs.stat().st_mtime)
+            if need:
+                _render_tmx_to_png(tmx_path, rendered_abs)
+        has_image = rendered_abs.exists()
+
         # Determine score class
         score = ver_result.get("overall_score", 0)
         if score >= 8:
@@ -245,6 +316,7 @@ def generate_html_report(generation_file: Path, verification_file: Path, output_
                 <div class="map-content">
                     <div>
                         <div class="map-visual">{visual}</div>
+                        {f'<div style="margin-top:10px;"><img src="{rendered_rel.as_posix()}" alt="Rendered map {map_data.id}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>' if has_image else ''}
                         <div class="entity-legend">
                             <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br>
                             <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
