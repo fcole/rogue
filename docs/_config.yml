@@ -1,0 +1,47 @@
+title: "Roguelike Map Generation Reports"
+description: "Chronological reports of AI-generated roguelike maps with verification scores and analysis"
+baseurl: "/rogue"
+url: "https://fcole.github.io"
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+theme: minima
+
+# Plugins
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+# Collections
+collections:
+  posts:
+    output: true
+    permalink: /:year/:month/:day/:title/
+
+# Pagination
+paginate: 10
+paginate_path: "/page:num/"
+
+# Default front matter
+defaults:
+  - scope:
+      path: "_posts"
+      type: posts
+    values:
+      layout: "report"
+      author: "Rogue Map Generator"
+
+# Exclude files from processing
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+# Date format
+date_format: "%B %d, %Y"
+
+# Timezone
+timezone: America/New_York
