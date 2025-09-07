@@ -44,19 +44,36 @@ def render_tmx(tmx_path: Path, out_dir: Path) -> Path:
     tw = int(root.get("tilewidth"))
     th = int(root.get("tileheight"))
 
-    # Tileset image
-    ts = root.find("tileset")
-    assert ts is not None, "No tileset found"
-    firstgid = int(ts.get("firstgid"))
-    columns = int(ts.get("columns"))
-    img_el = ts.find("image")
-    assert img_el is not None, "Tileset <image> missing"
-    ts_img_path = (tmx_path.parent / img_el.get("source")).resolve()
+    # Load all tilesets
+    tilesets = []
+    for ts in root.findall("tileset"):
+        firstgid = int(ts.get("firstgid"))
+        columns = int(ts.get("columns"))
+        tilecount = int(ts.get("tilecount"))
+        img_el = ts.find("image")
+        assert img_el is not None, f"Tileset <image> missing for tileset with firstgid {firstgid}"
+        ts_img_path = (tmx_path.parent / img_el.get("source")).resolve()
+        sheet = Image.open(ts_img_path).convert("RGBA")
+        tilesets.append({
+            'firstgid': firstgid,
+            'columns': columns,
+            'tilecount': tilecount,
+            'sheet': sheet,
+            'lastgid': firstgid + tilecount - 1
+        })
 
-    sheet = Image.open(ts_img_path).convert("RGBA")
+    # Sort tilesets by firstgid for efficient lookup
+    tilesets.sort(key=lambda x: x['firstgid'])
 
     # Prepare canvas
     canvas = Image.new("RGBA", (width * tw, height * th), (0, 0, 0, 0))
+
+    # Function to find tileset for a given GID
+    def find_tileset(gid):
+        for ts in tilesets:
+            if ts['firstgid'] <= gid <= ts['lastgid']:
+                return ts
+        return None
 
     # Draw layers in file order
     for layer in root.findall("layer"):
@@ -66,12 +83,21 @@ def render_tmx(tmx_path: Path, out_dir: Path) -> Path:
                 gid = grid[y][x]
                 if gid <= 0:
                     continue
-                local = gid - firstgid
-                if local < 0:
+
+                # Find which tileset this GID belongs to
+                tileset = find_tileset(gid)
+                if tileset is None:
+                    print(f"Warning: No tileset found for GID {gid}, skipping tile")
                     continue
-                sx = (local % columns) * tw
-                sy = (local // columns) * th
-                tile = sheet.crop((sx, sy, sx + tw, sy + th))
+
+                local = gid - tileset['firstgid']
+                if local < 0 or local >= tileset['tilecount']:
+                    print(f"Warning: GID {gid} is out of bounds for tileset, skipping")
+                    continue
+
+                sx = (local % tileset['columns']) * tw
+                sy = (local // tileset['columns']) * th
+                tile = tileset['sheet'].crop((sx, sy, sx + tw, sy + th))
                 canvas.alpha_composite(tile, (x * tw, y * th))
 
     out_dir.mkdir(parents=True, exist_ok=True)
