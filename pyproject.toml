@@ -15,8 +15,6 @@ jsonschema = "^4.0"
 anthropic = "^0.34.0"
 pdfkit = "^1.0.0"
 
-[tool.poetry.scripts]
-roguelike = "roguelike.cli:main"
 
 [build-system]
 requires = ["poetry-core"]
