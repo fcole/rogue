@@ -59,7 +59,7 @@ Entities:
 - 1x player: (7,6)
 - 1x shop: (10,6)
 - 2x goblin: (9,7), (7,5)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_000" src="{{ '/assets/images/map_000.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_000" src="{{ '/assets/images/20250907_134515_map_000.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -119,7 +119,7 @@ Entities:
 - 1x player: (2,2)
 - 3x ogre: (9,2), (15,4), (10,7)
 - 1x chest: (15,10)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_001" src="{{ '/assets/images/map_001.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_001" src="{{ '/assets/images/20250907_134515_map_001.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -178,7 +178,7 @@ Entities:
 Entities:
 - 1x player: (6,3)
 - 3x goblin: (13,8), (5,7), (12,2)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_002" src="{{ '/assets/images/map_002.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_002" src="{{ '/assets/images/20250907_134515_map_002.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -239,7 +239,7 @@ Entities:
 - 2x chest: (14,4), (15,10)
 - 1x spirit: (6,10)
 - 1x tomb: (8,10)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_003" src="{{ '/assets/images/map_003.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_003" src="{{ '/assets/images/20250907_134515_map_003.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -299,7 +299,7 @@ Entities:
 - 1x player: (3,2)
 - 2x spirit: (6,9), (12,4)
 - 3x tomb: (15,10), (4,9), (14,4)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_004" src="{{ '/assets/images/map_004.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_004" src="{{ '/assets/images/20250907_134515_map_004.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -359,7 +359,7 @@ Entities:
 - 1x player: (9,7)
 - 4x shop: (3,4), (3,9), (16,4), (16,9)
 - 3x human: (11,8), (8,9), (7,6)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_005" src="{{ '/assets/images/map_005.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_005" src="{{ '/assets/images/20250907_134515_map_005.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -420,7 +420,7 @@ Entities:
 - 1x spirit: (15,7)
 - 1x human: (16,7)
 - 2x ogre: (9,8), (7,6)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_006" src="{{ '/assets/images/map_006.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_006" src="{{ '/assets/images/20250907_134515_map_006.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -480,7 +480,7 @@ Entities:
 - 1x player: (9,9)
 - 3x goblin: (3,7), (15,6), (10,2)
 - 1x chest: (7,5)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_007" src="{{ '/assets/images/map_007.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_007" src="{{ '/assets/images/20250907_134515_map_007.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -541,7 +541,7 @@ Entities:
 - 1x spirit: (14,5)
 - 1x chest: (9,11)
 - 1x tomb: (9,7)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_008" src="{{ '/assets/images/map_008.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_008" src="{{ '/assets/images/20250907_134515_map_008.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human
@@ -603,7 +603,7 @@ Entities:
 - 1x shop: (6,4)
 - 1x spirit: (11,8)
 - 1x chest: (16,6)</div>
-<div style="margin-top:10px;"><img alt="Rendered map map_009" src="{{ '/assets/images/map_009.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
+<div style="margin-top:10px;"><img alt="Rendered map map_009" src="{{ '/assets/images/20250907_134515_map_009.png' | relative_url }}" style="image-rendering: pixelated; border:1px solid #ccc;"/></div>
 <div class="entity-legend">
 <strong>Legend:</strong> # = wall, . = floor, + = door, ~ = water<br/>
 <strong>Entities:</strong> @ = player, O = ogre, G = goblin, S = shop, C = chest, T = tomb, X = spirit, H = human

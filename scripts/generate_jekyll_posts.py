@@ -67,7 +67,7 @@ def extract_report_metadata(soup):
     return metadata
 
 
-def process_html_content(soup, output_dir):
+def process_html_content(soup, output_dir, timestamp_prefix):
     """Process the HTML content and copy images to Jekyll assets."""
     assets_dir = Path(output_dir) / 'assets' / 'images'
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -80,12 +80,17 @@ def process_html_content(soup, output_dir):
             # Copy image to Jekyll assets
             original_path = Path('data') / src
             if original_path.exists():
-                filename = original_path.name
-                dest_path = assets_dir / filename
+                # Add timestamp prefix to avoid overwrites
+                original_filename = original_path.name
+                name_part = original_filename.rsplit('.', 1)[0]
+                ext_part = original_filename.rsplit('.', 1)[1] if '.' in original_filename else ''
+                timestamped_filename = f"{timestamp_prefix}_{name_part}.{ext_part}" if ext_part else f"{timestamp_prefix}_{name_part}"
+                
+                dest_path = assets_dir / timestamped_filename
                 shutil.copy2(original_path, dest_path)
                 
                 # Update src to Jekyll asset path
-                img['src'] = f"{{{{ '/assets/images/{filename}' | relative_url }}}}"
+                img['src'] = f"{{{{ '/assets/images/{timestamped_filename}' | relative_url }}}}"
     
     # Remove the outer html/body structure, keep only the content inside .container
     container = soup.find('div', class_='container')
@@ -119,8 +124,11 @@ def create_jekyll_post(report_path, output_dir='docs'):
     # Extract metadata
     metadata = extract_report_metadata(soup)
     
+    # Create timestamp prefix for images
+    timestamp_prefix = metadata['post_date'].strftime('%Y%m%d_%H%M%S')
+    
     # Process HTML content
-    processed_content = process_html_content(soup, output_dir)
+    processed_content = process_html_content(soup, output_dir, timestamp_prefix)
     
     # Create Jekyll post filename
     post_filename = f"{metadata['jekyll_date']}-map-generation-report.md"
