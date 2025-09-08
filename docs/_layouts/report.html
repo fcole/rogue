@@ -191,12 +191,12 @@
     </div>
     
     <div class="navigation">
-        <a href="{{ '/' | relative_url }}">← All Reports</a>
         {% if page.previous.url %}
-            <a href="{{ page.previous.url | relative_url }}">← Newer Report</a>
+            <a href="{{ page.previous.url | relative_url }}">← Older Report</a>
         {% endif %}
+        <a href="{{ '/' | relative_url }}">All Reports</a>
         {% if page.next.url %}
-            <a href="{{ page.next.url | relative_url }}">Older Report →</a>
+            <a href="{{ page.next.url | relative_url }}">Newer Report →</a>
         {% endif %}
     </div>
 
