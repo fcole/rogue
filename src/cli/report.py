@@ -45,7 +45,7 @@ def _render_tmx_to_png(tmx_path: Path, out_png: Path) -> bool:
             img_el = ts.find("image")
             if img_el is None:
                 continue
-            sheet_path = (tmx_path.parent \/ img_el.get("source")).resolve()
+            sheet_path = (tmx_path.parent / img_el.get("source")).resolve()
             sheet = Image.open(sheet_path).convert("RGBA")
             tilesets.append({
                 "firstgid": firstgid,

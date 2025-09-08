@@ -5,7 +5,7 @@ using the DawnLike 16x16 tileset and the visual style from the example
 quadplay/examples/rpg/castle.tmx (for walls/floors) and a simple water fill.
 
 Current scope:
-- Supported ASCII: '#', '.', '+', '~'
+- Supported ASCII: '#', '.', '+', '~' (also 'S' shop, 'H' human if present)
 - One floor variant (learned from castle Base layer most-common tile)
 - Walls: 4-neighbor mask autotiling learned from castle Walls layer
 - Doors ('+'): clear walls at that position (no door sprite yet)
@@ -47,6 +47,11 @@ ENEMY_GIDS = {
     'ogre': 3037,     # Row 2, Column 12 (likely large creature area)
     'spirit': 3619,   # Row 3, Column 16 (likely ethereal area)
 }
+
+# Friendly/neutral NPC sprite picks (reasonable defaults on the DawnLike NPC sheet)
+# These are approximate but stable GIDs within the NPC tileset range.
+HUMAN_GID = 3485        # generic peasant/villager
+SHOPKEEPER_GID = 3487   # merchant/shopkeeper
 
 # NPC tileset constants
 NPC_TILESET_FIRSTGID = 3000
@@ -197,6 +202,7 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
     foreground = [0] * (width * height)
     details = [0] * (width * height)  # props like chests/tombs
     enemies = [0] * (width * height)  # enemy sprites
+    npcs = [0] * (width * height)     # neutral/friendly NPC sprites (humans, shopkeepers)
     player = [0] * (width * height)   # player sprite
 
     def idx(x: int, y: int) -> int:
@@ -302,6 +308,43 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
             col = local_tile % NPC_TILESET_COLUMNS
             print(f"  {ent_type}: GID {gid} -> Row {row}, Column {col}")
 
+    # Place neutral/friendly NPCs (humans and shopkeepers) on a dedicated NPCs layer.
+    # Also accept ASCII 'H' (human) and 'S' (shop) markers if present.
+    npc_count = 0
+    # From structured entities first
+    for ent in (entities or {}).get('human', []) or []:
+        hx = int(ent.get('x', 0)); hy = int(ent.get('y', 0))
+        if 0 <= hx < width and 0 <= hy < height:
+            npcs[idx(hx, hy)] = HUMAN_GID
+            npc_count += 1
+            local_tile = HUMAN_GID - NPC_TILESET_FIRSTGID
+            r = local_tile // NPC_TILESET_COLUMNS
+            c = local_tile % NPC_TILESET_COLUMNS
+            print(f"Placed human at ({hx}, {hy}) using GID {HUMAN_GID} (Row {r}, Column {c})")
+
+    for ent in (entities or {}).get('shop', []) or []:
+        sx = int(ent.get('x', 0)); sy = int(ent.get('y', 0))
+        if 0 <= sx < width and 0 <= sy < height:
+            npcs[idx(sx, sy)] = SHOPKEEPER_GID
+            npc_count += 1
+            local_tile = SHOPKEEPER_GID - NPC_TILESET_FIRSTGID
+            r = local_tile // NPC_TILESET_COLUMNS
+            c = local_tile % NPC_TILESET_COLUMNS
+            print(f"Placed shopkeeper at ({sx}, {sy}) using GID {SHOPKEEPER_GID} (Row {r}, Column {c})")
+
+    # From raw ASCII, if present
+    for y, row in enumerate(lines):
+        for x, ch in enumerate(row):
+            if ch == 'H':
+                npcs[idx(x, y)] = HUMAN_GID
+                npc_count += 1
+            elif ch == 'S':
+                npcs[idx(x, y)] = SHOPKEEPER_GID
+                npc_count += 1
+
+    if npc_count > 0:
+        print(f"Placed {npc_count} neutral NPCs (humans/shops)")
+
     # Place player sprite on Player layer
     player_count = 0
     if 'player' in entities:
@@ -329,7 +372,7 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
         "tilewidth": str(TILE_SIZE),
         "tileheight": str(TILE_SIZE),
         "infinite": "0",
-        "nextlayerid": "8",
+        "nextlayerid": "9",
         "nextobjectid": "1",
     })
 
@@ -398,10 +441,11 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
     add_layer(4, "Foreground", foreground)
     add_layer(5, "Details", details)
     add_layer(6, "Enemies", enemies)
-    add_layer(7, "Player", player)
+    add_layer(7, "NPCs", npcs)
+    add_layer(8, "Player", player)
 
     # Objects: export entities as an objectgroup
-    objgroup = ET.SubElement(map_el, "objectgroup", attrib={"id": "8", "name": "Objects"})
+    objgroup = ET.SubElement(map_el, "objectgroup", attrib={"id": "9", "name": "Objects"})
     next_obj_id = 1
     for etype, items in (entities or {}).items():
         for ent in items:
