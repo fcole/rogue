@@ -27,8 +27,8 @@ def _parse_csv_layer(layer: ET.Element, width: int, height: int):
 def _render_tmx_to_png(tmx_path: Path, out_png: Path) -> bool:
     """Render a TMX file to PNG. Returns True on success.
 
-    Keeps implementation minimal and aligned with our exporter: one image tileset,
-    CSV layers, no flips. If Pillow is unavailable, returns False.
+    Supports multiple image tilesets in draw order with CSV layers. If
+    Pillow is unavailable, returns False.
     """
     if Image is None:
         return False
@@ -36,16 +36,37 @@ def _render_tmx_to_png(tmx_path: Path, out_png: Path) -> bool:
         root = ET.parse(tmx_path).getroot()
         w = int(root.get("width")); h = int(root.get("height"))
         tw = int(root.get("tilewidth")); th = int(root.get("tileheight"))
-        ts = root.find("tileset")
-        if ts is None:
+        # Load all tilesets
+        tilesets = []
+        for ts in root.findall("tileset"):
+            firstgid = int(ts.get("firstgid"))
+            cols = int(ts.get("columns"))
+            tilecount = int(ts.get("tilecount"))
+            img_el = ts.find("image")
+            if img_el is None:
+                continue
+            sheet_path = (tmx_path.parent \/ img_el.get("source")).resolve()
+            sheet = Image.open(sheet_path).convert("RGBA")
+            tilesets.append({
+                "firstgid": firstgid,
+                "columns": cols,
+                "tilecount": tilecount,
+                "lastgid": firstgid + tilecount - 1,
+                "sheet": sheet,
+            })
+
+        if not tilesets:
             return False
-        firstgid = int(ts.get("firstgid"))
-        cols = int(ts.get("columns"))
-        img_el = ts.find("image")
-        if img_el is None:
-            return False
-        sheet_path = (tmx_path.parent / img_el.get("source")).resolve()
-        sheet = Image.open(sheet_path).convert("RGBA")
+
+        # sort by firstgid
+        tilesets.sort(key=lambda t: t["firstgid"])
+
+        def find_tileset(gid: int):
+            for ts in tilesets:
+                if ts["firstgid"] <= gid <= ts["lastgid"]:
+                    return ts
+            return None
+
         canvas = Image.new("RGBA", (w * tw, h * th), (0, 0, 0, 0))
         for layer in root.findall("layer"):
             grid = _parse_csv_layer(layer, w, h)
@@ -54,12 +75,15 @@ def _render_tmx_to_png(tmx_path: Path, out_png: Path) -> bool:
                     gid = grid[yy][xx]
                     if gid <= 0:
                         continue
-                    local = gid - firstgid
-                    if local < 0:
+                    ts = find_tileset(gid)
+                    if ts is None:
                         continue
-                    sx = (local % cols) * tw
-                    sy = (local // cols) * th
-                    tile = sheet.crop((sx, sy, sx + tw, sy + th))
+                    local = gid - ts["firstgid"]
+                    if local < 0 or local >= ts["tilecount"]:
+                        continue
+                    sx = (local % ts["columns"]) * tw
+                    sy = (local // ts["columns"]) * th
+                    tile = ts["sheet"].crop((sx, sy, sx + tw, sy + th))
                     canvas.alpha_composite(tile, (xx * tw, yy * th))
         out_png.parent.mkdir(parents=True, exist_ok=True)
         canvas.save(out_png)

@@ -54,6 +54,16 @@ NPC_TILESET_IMAGE = os.path.join("quadplay", "sprites", "dawnlike-npcs-16x16.png
 NPC_TILESET_COLUMNS = 48  # 768/16 = 48 columns
 NPC_TILESET_TILECOUNT = 1440  # 48 * 30 = 1440 total tiles
 
+# Player tileset constants
+# The warrior sheet in this repo is 64x64 (4x4 tiles of 16x16 each).
+# Give it a non-overlapping firstgid range beyond the NPC tileset
+# (NPC range is 3000..4439). Use 5000+ for safety.
+PLAYER_TILESET_FIRSTGID = 5000
+PLAYER_TILESET_IMAGE = os.path.join("quadplay", "sprites", "dawnlike-warrior-16x16.png")
+PLAYER_TILESET_COLUMNS = 4   # 64 / 16
+PLAYER_TILESET_TILECOUNT = 16  # 4 x 4
+PLAYER_GID = PLAYER_TILESET_FIRSTGID + 1  # second tile (facing down idle/walk)
+
 CASTLE_TMX = os.path.join("quadplay", "examples", "rpg", "castle.tmx")
 WORLD_TMX = os.path.join("quadplay", "examples", "rpg", "world.tmx")
 
@@ -187,6 +197,7 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
     foreground = [0] * (width * height)
     details = [0] * (width * height)  # props like chests/tombs
     enemies = [0] * (width * height)  # enemy sprites
+    player = [0] * (width * height)   # player sprite
 
     def idx(x: int, y: int) -> int:
         return y * width + x
@@ -248,8 +259,8 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
     # Place chest/tomb props onto Details layer for visual flavor
     # Use specific sprite IDs that read clearly on the castle floor.
     # Use clearly readable sprites:
-    CHEST_GID = 1511  # signboard-like chest surrogate (wooden box on stand)
-    TOMB_GID = 1509   # stone slab (tomb-like)
+    CHEST_GID = 2290 
+    TOMB_GID = 1553
     # Map ASCII if entities are not provided for legacy cases
     char_entity_map = {'C': 'chest', 'T': 'tomb'}
     for y, row in enumerate(lines):
@@ -291,6 +302,22 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
             col = local_tile % NPC_TILESET_COLUMNS
             print(f"  {ent_type}: GID {gid} -> Row {row}, Column {col}")
 
+    # Place player sprite on Player layer
+    player_count = 0
+    if 'player' in entities:
+        for ent in entities['player']:
+            px = int(ent.get('x', 0)); py = int(ent.get('y', 0))
+            if 0 <= px < width and 0 <= py < height:
+                player[idx(px, py)] = PLAYER_GID
+                player_count += 1
+                local_tile = PLAYER_GID - PLAYER_TILESET_FIRSTGID
+                row = local_tile // PLAYER_TILESET_COLUMNS
+                col = local_tile % PLAYER_TILESET_COLUMNS
+                print(f"Placed player at ({px}, {py}) using GID {PLAYER_GID} (local tile: {local_tile}, Row {row}, Column {col})")
+
+    if player_count > 1:
+        print(f"Warning: Found {player_count} player entities, but only the last one will be visible")
+
     # Build TMX XML
     map_el = ET.Element("map", attrib={
         "version": "1.2",
@@ -302,7 +329,7 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
         "tilewidth": str(TILE_SIZE),
         "tileheight": str(TILE_SIZE),
         "infinite": "0",
-        "nextlayerid": "7",
+        "nextlayerid": "8",
         "nextobjectid": "1",
     })
 
@@ -335,6 +362,21 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
         "height": str((NPC_TILESET_TILECOUNT // NPC_TILESET_COLUMNS + (1 if NPC_TILESET_TILECOUNT % NPC_TILESET_COLUMNS else 0)) * TILE_SIZE),
     })
 
+    # Add Player tileset for player sprites
+    player_tileset_el = ET.SubElement(map_el, "tileset", attrib={
+        "firstgid": str(PLAYER_TILESET_FIRSTGID),
+        "name": "dawnlike-warrior-16x16",
+        "tilewidth": str(TILE_SIZE),
+        "tileheight": str(TILE_SIZE),
+        "tilecount": str(PLAYER_TILESET_TILECOUNT),
+        "columns": str(PLAYER_TILESET_COLUMNS),
+    })
+    ET.SubElement(player_tileset_el, "image", attrib={
+        "source": os.path.relpath(PLAYER_TILESET_IMAGE, os.path.dirname(os.path.join(out_dir, f"{map_id}.tmx"))),
+        "width": str(PLAYER_TILESET_COLUMNS * TILE_SIZE),
+        "height": str((PLAYER_TILESET_TILECOUNT // PLAYER_TILESET_COLUMNS + (1 if PLAYER_TILESET_TILECOUNT % PLAYER_TILESET_COLUMNS else 0)) * TILE_SIZE),
+    })
+
     def add_layer(layer_id: int, name: str, arr: List[int]):
         layer_el = ET.SubElement(map_el, "layer", attrib={
             "id": str(layer_id),
@@ -356,9 +398,10 @@ def ascii_to_tmx(json_path: str, out_dir: str, pal: LearnedPalette) -> str:
     add_layer(4, "Foreground", foreground)
     add_layer(5, "Details", details)
     add_layer(6, "Enemies", enemies)
+    add_layer(7, "Player", player)
 
     # Objects: export entities as an objectgroup
-    objgroup = ET.SubElement(map_el, "objectgroup", attrib={"id": "7", "name": "Objects"})
+    objgroup = ET.SubElement(map_el, "objectgroup", attrib={"id": "8", "name": "Objects"})
     next_obj_id = 1
     for etype, items in (entities or {}).items():
         for ent in items:
